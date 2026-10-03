@@ -1,0 +1,38 @@
+
+# 1. User Registration (Public Access)
+# Submits a new user registration. Status flag is set to PENDING upon success.
+POST {{host}}/api/public/auth/registration
+Content-Type: application/json
+X-Header: {{secret_header_value}}
+
+{
+    "username": "new_user_test",
+    "email": "new_user@system.local",
+    "plain_password": "Password@123"
+}
+
+
+###
+# 2. User Authentication / Login (Public Access)
+# Authenticates user credentials. Returns JWT payload and sets HTTP-Only Cookies (access_token & refresh_token).
+# Try with seeded Super Admin credentials: username="superadmin", plain_password="Admin@123456"
+# Or seeded Staff User credentials: username="staff_user", plain_password="Password@123"
+# @name login
+POST {{host}}/api/public/auth/auth-tokens
+Content-Type: application/json
+X-Header: {{secret_header_value}}
+
+{
+    "username": "superadmin",
+    "plain_password": "Admin@123456"
+}
+
+
+###
+# 3. Refresh Access Token (Public Access)
+# Uses the refresh_token stored in HTTP-Only cookie (automatically sent by REST Client cookie jar)
+# or passed explicitly via Cookie header to issue a new access_token.
+POST {{host}}/api/public/auth/refresh-token
+Content-Type: application/json
+X-Header: {{secret_header_value}}
+# Cookie: refresh_token=YOUR_REFRESH_TOKEN_HERE

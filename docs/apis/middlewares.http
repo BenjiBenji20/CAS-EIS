@@ -1,0 +1,6 @@
+
+GET {{host}}/api/private/test-jwt-middleware
+Content-Type: application/json
+X-Header: {{secret_header_value}}
+Authorization: Bearer # Use valid access token or let cookies inject it 
+

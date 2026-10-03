@@ -1,0 +1,53 @@
+[project]
+name = "xcom-erp"
+version = "0.1.0"
+description = "XCom Monolithic ERP System"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    # --- Core Framework & Environment ---
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.30.0",
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.2.0",
+    "email-validator>=2.1.0",
+    # --- Database, ORM & Migrations ---
+    "sqlalchemy[asyncio]>=2.0.30",
+    "asyncpg>=0.29.0",              # High-performance async PostgreSQL driver
+    "psycopg[binary]>=3.1.19",      # Sync PostgreSQL driver required by Alembic CLI
+    "alembic>=1.13.0",              # Database migration tool
+    # --- Auth, Security & RBAC ---
+    "pyjwt[crypto]>=2.8.0",          # JWT encoding, decoding, and validation
+    "pwdlib[argon2]>=0.2.0",         # Modern password hashing (Argon2id recommended by OWASP)
+    "python-multipart>=0.0.9",       # Parses form data for OAuth2 password login flows
+    # --- Caching, Sessions & Async Tasks ---
+    "redis[hiredis]>=5.0.0",         # Async Redis client with C-extension parser
+    # --- Financial Operations & Export Engine ---
+    "pandas>=2.2.0",                 # Heavy financial data aggregation and reporting
+    "openpyxl>=3.1.0",               # Excel (.xlsx) export engine for Accounting/Payroll
+    "reportlab>=4.2.0",              # PDF generation for pay slips and invoices
+    "loguru>=0.7.3",
+    "uuid6>=2025.0.1",
+    "bcrypt>=5.0.0",
+]
+
+[dependency-groups]
+dev = [
+    # --- Developer & Testing Tools ---
+    "pytest>=8.2.0",
+    "pytest-asyncio>=0.23.0",
+    "httpx>=0.27.0",                 # Async HTTP client for endpoint integration testing
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
