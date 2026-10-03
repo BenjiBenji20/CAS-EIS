@@ -2,7 +2,7 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
-    APP_NAME: str = "XCom ERP Server System"
+    APP_NAME: str = "XCom"
     DEBUG: bool = True
     ENVIRONMENT: Literal["dev", "prod", "test"] = "dev"
     LOG_LEVEL: str = "INFO"
