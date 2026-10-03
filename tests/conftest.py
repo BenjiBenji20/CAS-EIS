@@ -27,6 +27,7 @@ from db.cache_session import get_async_cache
 from modules.authentication import auth_model  # noqa: F401
 from modules.profile import user_profile_model  # noqa: F401
 from modules.session import session_model  # noqa: F401
+from modules.eis import eis_model  # noqa: F401
 
 # Derive test database URL using TEST_DATABASE_URL
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL", settings.TEST_DATABASE_URL or "")
@@ -47,6 +48,7 @@ async def prepare_test_database():
         await conn.execute(sa.text("CREATE SCHEMA IF NOT EXISTS auth"))
         await conn.execute(sa.text("CREATE SCHEMA IF NOT EXISTS profile"))
         await conn.execute(sa.text("CREATE SCHEMA IF NOT EXISTS session"))
+        await conn.execute(sa.text("CREATE SCHEMA IF NOT EXISTS eis"))
         await conn.run_sync(Base.metadata.create_all)
     yield
     await engine.dispose()

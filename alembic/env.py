@@ -18,6 +18,7 @@ from db.base import Base
 from modules.authentication import auth_model  # noqa: F401
 from modules.profile import user_profile_model  # noqa: F401
 from modules.session import session_model  # noqa: F401
+from modules.eis import eis_model  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

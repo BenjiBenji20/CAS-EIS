@@ -487,69 +487,6 @@ wheels = [
 ]
 
 [[package]]
-name = "xcom-erp"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "alembic" },
-    { name = "asyncpg" },
-    { name = "bcrypt" },
-    { name = "email-validator" },
-    { name = "fastapi" },
-    { name = "loguru" },
-    { name = "openpyxl" },
-    { name = "pandas" },
-    { name = "psycopg", extra = ["binary"] },
-    { name = "pwdlib", extra = ["argon2"] },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "pyjwt", extra = ["crypto"] },
-    { name = "python-multipart" },
-    { name = "redis", extra = ["hiredis"] },
-    { name = "reportlab" },
-    { name = "sqlalchemy", extra = ["asyncio"] },
-    { name = "uuid6" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "httpx" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "alembic", specifier = ">=1.13.0" },
-    { name = "asyncpg", specifier = ">=0.29.0" },
-    { name = "bcrypt", specifier = ">=5.0.0" },
-    { name = "email-validator", specifier = ">=2.1.0" },
-    { name = "fastapi", specifier = ">=0.111.0" },
-    { name = "loguru", specifier = ">=0.7.3" },
-    { name = "openpyxl", specifier = ">=3.1.0" },
-    { name = "pandas", specifier = ">=2.2.0" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.1.19" },
-    { name = "pwdlib", extras = ["argon2"], specifier = ">=0.2.0" },
-    { name = "pydantic", specifier = ">=2.7.0" },
-    { name = "pydantic-settings", specifier = ">=2.2.0" },
-    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.8.0" },
-    { name = "python-multipart", specifier = ">=0.0.9" },
-    { name = "redis", extras = ["hiredis"], specifier = ">=5.0.0" },
-    { name = "reportlab", specifier = ">=4.2.0" },
-    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.30" },
-    { name = "uuid6", specifier = ">=2025.0.1" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "httpx", specifier = ">=0.27.0" },
-    { name = "pytest", specifier = ">=8.2.0" },
-    { name = "pytest-asyncio", specifier = ">=0.23.0" },
-]
-
-[[package]]
 name = "dnspython"
 version = "2.8.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2052,4 +1989,71 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/b3/8f/705086c9d734d3b663af0e9bb3d4de6578d08f46b1b101c2442fd9aecaa2/win32_setctime-1.2.0.tar.gz", hash = "sha256:ae1fdf948f5640aae05c511ade119313fb6a30d7eabe25fef9764dca5873c4c0", size = 4867, upload-time = "2024-12-07T15:28:28.314Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e1/07/c6fe3ad3e685340704d314d765b7912993bcb8dc198f0e7a89382d37974b/win32_setctime-1.2.0-py3-none-any.whl", hash = "sha256:95d644c4e708aba81dc3704a116d8cbc974d70b3bdb8be1d150e36be6e9d1390", size = 4083, upload-time = "2024-12-07T15:28:26.465Z" },
+]
+
+[[package]]
+name = "xcom-erp"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "alembic" },
+    { name = "asyncpg" },
+    { name = "bcrypt" },
+    { name = "cryptography" },
+    { name = "email-validator" },
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "loguru" },
+    { name = "openpyxl" },
+    { name = "pandas" },
+    { name = "psycopg", extra = ["binary"] },
+    { name = "pwdlib", extra = ["argon2"] },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "pyjwt", extra = ["crypto"] },
+    { name = "python-multipart" },
+    { name = "redis", extra = ["hiredis"] },
+    { name = "reportlab" },
+    { name = "sqlalchemy", extra = ["asyncio"] },
+    { name = "uuid6" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "httpx" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "alembic", specifier = ">=1.13.0" },
+    { name = "asyncpg", specifier = ">=0.29.0" },
+    { name = "bcrypt", specifier = ">=5.0.0" },
+    { name = "cryptography", specifier = ">=42.0.0" },
+    { name = "email-validator", specifier = ">=2.1.0" },
+    { name = "fastapi", specifier = ">=0.111.0" },
+    { name = "httpx", specifier = ">=0.27.0" },
+    { name = "loguru", specifier = ">=0.7.3" },
+    { name = "openpyxl", specifier = ">=3.1.0" },
+    { name = "pandas", specifier = ">=2.2.0" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.1.19" },
+    { name = "pwdlib", extras = ["argon2"], specifier = ">=0.2.0" },
+    { name = "pydantic", specifier = ">=2.7.0" },
+    { name = "pydantic-settings", specifier = ">=2.2.0" },
+    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.8.0" },
+    { name = "python-multipart", specifier = ">=0.0.9" },
+    { name = "redis", extras = ["hiredis"], specifier = ">=5.0.0" },
+    { name = "reportlab", specifier = ">=4.2.0" },
+    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.30" },
+    { name = "uuid6", specifier = ">=2025.0.1" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "httpx", specifier = ">=0.27.0" },
+    { name = "pytest", specifier = ">=8.2.0" },
+    { name = "pytest-asyncio", specifier = ">=0.23.0" },
 ]
