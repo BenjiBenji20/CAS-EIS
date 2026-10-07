@@ -1,3 +1,6 @@
+# Ignore BIR official docs due to large file size
+bir-docs/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
