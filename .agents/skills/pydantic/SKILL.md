@@ -6,7 +6,7 @@ Description:
 
 # Pydantic v2 Data Modeling Standards
 
-This skill defines the schema modeling rules, financial precision standards, validation patterns, and DTO boundaries across the XCom ERP backend.
+This skill defines the schema modeling rules, financial precision standards, validation patterns, and DTO boundaries across the USSCI ERP backend.
 
 ---
 

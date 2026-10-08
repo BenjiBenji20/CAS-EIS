@@ -1,7 +1,7 @@
 [project]
-name = "xcom-erp"
+name = "ussci-erp"
 version = "0.1.0"
-description = "XCom Monolithic ERP System"
+description = "USSCI Monolithic ERP System"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

@@ -6,7 +6,7 @@ Description:
 
 # Redis Caching & State Management Rules
 
-This skill governs the async Redis client usage, key namespacing conventions, TTL expiration enforcement, and cache invalidation patterns across the XCom ERP backend.
+This skill governs the async Redis client usage, key namespacing conventions, TTL expiration enforcement, and cache invalidation patterns across the USSCI ERP backend.
 
 ---
 
