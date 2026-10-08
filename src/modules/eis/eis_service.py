@@ -338,8 +338,12 @@ class EisService:
             raw_response=raw_resp_str,
         )
 
-        # Launch background polling task
-        asyncio.create_task(self._poll_inquiry(submit_id, transmission.id))
+        # Enqueue submit_id to Redis worker for durable background inquiry polling
+        try:
+            from modules.eis.eis_worker import enqueue_inquiry
+            await enqueue_inquiry(submit_id)
+        except Exception as e:
+            logger.warning(f"Could not enqueue submit_id '{submit_id}' to Redis worker: {e}")
 
         return EisTransmitResponse(
             id=transmission.id,
@@ -359,103 +363,144 @@ class EisService:
     # 3. INQUIRY POLLING & STATUS
     # ─────────────────────────────────────────────────────────────────────────
 
-    async def _poll_inquiry(self, submit_id: str, transmission_id: uuid.UUID) -> None:
-        """Poll BIR EIS /api/{v}/invoice_result/{submitId} until processing completes."""
-        logger.info(f"Starting background inquiry polling for submit_id {submit_id}")
-        retries = 0
-        max_retries = settings.EIS_MAX_POLL_RETRIES
-        interval = settings.EIS_POLL_INTERVAL_S
+    async def poll_inquiry_for_submit_id(self, submit_id: str) -> bool:
+        """Poll BIR EIS /api/{v}/invoice_result/{submitId} and update transmission audit records.
 
-        while retries < max_retries:
-            await asyncio.sleep(interval)
-            retries += 1
-            logger.info(f"Polling BIR EIS inquiry attempt {retries}/{max_retries} for {submit_id}")
+        Adheres strictly to BIR EIS API Development Guide Section 7.3.3 (Pages 40-44):
+        - Parses 'processedDocuments' array containing invoiceUid, resultStatusCode, description.
+        - Uses EisResultStatus.from_bir_code to safely classify SUC001, SYN002-4, ERR001-7.
+        - Handles processStatusCode '01' (Completed), '02' (In processing), '03' (Unable to process).
 
-            try:
-                session = await self._ensure_bir_session()
-                dt_str = format_datetime()
-                url_path = f"/api/{settings.EIS_API_VERSION}/invoice_result/{submit_id}"
-                signature_val = f"{dt_str}GET{url_path}"
-                signature = hmac_sign(signature_val, session.session_key)
+        Returns:
+            True if transmission reached terminal state (ACKNOWLEDGED, PARTIAL, FAILED).
+            False if still in PROCESSING ('02') or transient error that should be retried.
+        """
+        transmission = await self._transmission_repo.get_by_submit_id(submit_id)
+        if not transmission:
+            logger.warning(f"Transmission with submit_id '{submit_id}' not found in database.")
+            return True
 
-                headers = {
-                    "accreditationId": settings.EIS_ACCREDITATION_ID,
-                    "applicationId": settings.EIS_APPLICATION_ID,
-                    "authToken": session.auth_token,
-                    "authorization": f"Bearer {signature}",
-                    "datetime": dt_str,
-                }
+        if transmission.status in (
+            EisTransmissionStatus.ACKNOWLEDGED,
+            EisTransmissionStatus.FAILED,
+            EisTransmissionStatus.PARTIAL,
+        ):
+            return True
 
-                base_url = settings.EIS_ENDPOINT_BASE_URL.rstrip("/")
-                full_url = f"{base_url}{url_path}"
+        self._verify_config()
+        session = await self._ensure_bir_session()
+        dt_str = format_datetime()
+        url_path = f"/api/{settings.EIS_API_VERSION}/invoice_result/{submit_id}"
+        signature_val = f"{dt_str}GET{url_path}"
+        signature = hmac_sign(signature_val, session.session_key)
 
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    response = await client.get(full_url, headers=headers)
-                    resp_data = response.json()
+        headers = {
+            "accreditationId": settings.EIS_ACCREDITATION_ID,
+            "applicationId": settings.EIS_APPLICATION_ID,
+            "authToken": session.auth_token,
+            "authorization": f"Bearer {signature}",
+            "datetime": dt_str,
+        }
 
-                if response.status_code != 200 or resp_data.get("errorDetails"):
-                    logger.warning(f"Inquiry poll returned error for {submit_id}: {resp_data}")
-                    continue
+        base_url = settings.EIS_ENDPOINT_BASE_URL.rstrip("/")
+        full_url = f"{base_url}{url_path}"
 
-                # Note: inquiry response data is unencrypted per BIR specification
-                inquiry_data = resp_data.get("data") or {}
-                process_code = inquiry_data.get("processStatusCode")
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(full_url, headers=headers)
+                resp_data = response.json()
+        except Exception as e:
+            logger.error(f"Network error during inquiry poll for submit_id {submit_id}: {e}")
+            return False
 
-                if process_code == EisProcessStatus.COMPLETED.value:
-                    logger.info(f"BIR EIS processing COMPLETED for {submit_id}")
-                    result_list = inquiry_data.get("resultList") or []
+        if response.status_code != 200 or resp_data.get("errorDetails"):
+            err_details = resp_data.get("errorDetails") or {}
+            err_code = err_details.get("errorCode") or "UNKNOWN_ERR"
+            err_msg = err_details.get("errorMessage") or response.text
+            logger.warning(f"Inquiry poll returned error for {submit_id}: [{err_code}] {err_msg}")
+            if err_code in ("E15", "E16", "E01", "E02"):
+                await self._transmission_repo.update_status(
+                    transmission,
+                    status=EisTransmissionStatus.FAILED,
+                    raw_response=json.dumps(resp_data),
+                )
+                return True
+            return False
 
-                    items_to_create = []
-                    has_error = False
-                    has_success = False
+        inquiry_data = resp_data.get("data") or {}
+        process_code = inquiry_data.get("processStatusCode")
 
-                    for res in result_list:
-                        res_status = res.get("resultStatus", EisResultStatus.SUCCESS.value)
-                        if res_status == EisResultStatus.SUCCESS.value:
-                            has_success = True
-                        else:
-                            has_error = True
+        if process_code == EisProcessStatus.COMPLETED.value:
+            logger.info(f"BIR EIS processing COMPLETED ('01') for {submit_id}")
+            # BIR spec uses 'processedDocuments' (Section 7.3.3.4, P. 41)
+            processed_docs = (
+                inquiry_data.get("processedDocuments")
+                or inquiry_data.get("resultList")
+                or []
+            )
 
-                        items_to_create.append(
-                            {
-                                "transmission_id": transmission_id,
-                                "eis_unique_id": res.get("eisUniqueId", ""),
-                                "comp_invoice_id": res.get("compInvoiceId", ""),
-                                "result_status": EisResultStatus(res_status),
-                                "fail_reason_code": res.get("failReasonCode"),
-                                "fail_message": res.get("failMessage"),
-                            }
-                        )
+            items_to_create = []
+            has_error = False
+            has_success = False
 
-                    if items_to_create:
-                        await self._item_repo.bulk_create(items_to_create)
+            for res in processed_docs:
+                uid = res.get("invoiceUid") or res.get("eisUniqueId") or ""
+                res_code = res.get("resultStatusCode") or res.get("resultStatus") or ""
+                res_status = EisResultStatus.from_bir_code(res_code)
+                fail_desc = res.get("description") or res.get("failMessage")
 
-                    final_status = EisTransmissionStatus.ACKNOWLEDGED
-                    if has_error and has_success:
-                        final_status = EisTransmissionStatus.PARTIAL
-                    elif has_error and not has_success:
-                        final_status = EisTransmissionStatus.FAILED
-
-                    transmission = await self._transmission_repo.get_by_id(transmission_id)
-                    if transmission:
-                        await self._transmission_repo.update_status(
-                            transmission,
-                            status=final_status,
-                            process_status_code=process_code,
-                            raw_response=json.dumps(resp_data),
-                            acknowledged_at=datetime.now(timezone.utc),
-                        )
-                    return
-
-                elif process_code == EisProcessStatus.PROCESSING.value:
-                    logger.debug(f"BIR EIS batch {submit_id} is still PROCESSING ('00').")
+                if res_status == EisResultStatus.SUCCESS:
+                    has_success = True
                 else:
-                    logger.warning(f"Unknown processStatusCode '{process_code}' for {submit_id}")
+                    has_error = True
 
-            except Exception as e:
-                logger.error(f"Exception during inquiry polling for {submit_id}: {e}")
+                items_to_create.append(
+                    {
+                        "transmission_id": transmission.id,
+                        "eis_unique_id": uid,
+                        "comp_invoice_id": res.get("compInvoiceId"),
+                        "result_status": res_status,
+                        "fail_reason_code": res_code,
+                        "fail_message": fail_desc,
+                    }
+                )
 
-        logger.warning(f"Inquiry polling exceeded max retries ({max_retries}) for submit_id {submit_id}")
+            if items_to_create:
+                await self._item_repo.bulk_create(items_to_create)
+
+            final_status = EisTransmissionStatus.ACKNOWLEDGED
+            if has_error and has_success:
+                final_status = EisTransmissionStatus.PARTIAL
+            elif has_error and not has_success:
+                final_status = EisTransmissionStatus.FAILED
+
+            await self._transmission_repo.update_status(
+                transmission,
+                status=final_status,
+                process_status_code=process_code,
+                raw_response=json.dumps(resp_data),
+                acknowledged_at=datetime.now(timezone.utc),
+            )
+            return True
+
+        elif process_code == EisProcessStatus.PROCESSING.value:
+            logger.debug(f"BIR EIS batch {submit_id} is in PROCESSING ('02') state.")
+            return False
+
+        elif process_code == EisProcessStatus.UNABLE_TO_PROCESS.value:
+            fail_reason = inquiry_data.get("failReasonStatusCode") or "UNABLE_TO_PROCESS"
+            logger.error(f"BIR EIS unable to process batch {submit_id}: [{fail_reason}]")
+            await self._transmission_repo.update_status(
+                transmission,
+                status=EisTransmissionStatus.FAILED,
+                process_status_code=process_code,
+                raw_response=json.dumps(resp_data),
+                acknowledged_at=datetime.now(timezone.utc),
+            )
+            return True
+        else:
+            logger.warning(f"Unexpected processStatusCode '{process_code}' for {submit_id}")
+            return False
 
     async def get_transmission_status(self, submit_id: str) -> EisInquiryResponse:
         """Fetch transmission record and individual item results from audit DB."""
