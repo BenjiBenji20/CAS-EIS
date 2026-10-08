@@ -1,10 +1,17 @@
 from decimal import Decimal
 from typing import Dict, List, Literal
 
+from modules.eis.eis_enums import EisTransClass
 from modules.eis.eis_schema import EisCasInvoice, EisLineItem
 
 # Tax classification categories per BIR EIS guidelines Section 5
 TaxClassification = Literal["VATABLE", "ZERO_RATED", "EXEMPT"]
+
+_TAX_CLASS_CODE_MAP = {
+    "VATABLE": EisTransClass.VATABLE.value,       # "01"
+    "ZERO_RATED": EisTransClass.ZERO_RATED.value, # "02"
+    "EXEMPT": EisTransClass.EXEMPT.value,         # "03"
+}
 
 
 def _classify_line_item(item: EisLineItem) -> TaxClassification:
@@ -26,14 +33,18 @@ def _classify_line_item(item: EisLineItem) -> TaxClassification:
 def check_mixed_tax_split(invoice: EisCasInvoice) -> List[EisCasInvoice]:
     """Inspect invoice line items and split if mixed tax treatments are detected.
 
-    BIR EIS API Development Guide Section 5 (Page 9):
+    BIR EIS API Development Guide Section 5 (Pages 18-24):
     Invoices containing mixed VATable, zero-rated, and exempt items must be
     segregated into separate document submissions to ensure correct tax ledgering.
+    Per Section 5.2:
+    - Separately sent invoices have the same Invoice Number (CompInvoiceId) in EIS.
+    - Each separate invoice has its own 24-character EisUniqueId.
+    - Each separate invoice is stamped with its respective TransClass (01, 02, 03).
 
     Returns:
     - [invoice] if all line items share the same tax classification.
-    - [inv_1, inv_2, ...] if multiple classifications exist, with recalculated totals
-      and suffixed EisUniqueIds.
+    - [inv_1, inv_2, ...] if multiple classifications exist, with recalculated totals,
+      recalculated VAT, identical CompInvoiceId, and valid 24-character EisUniqueIds.
     """
     if not invoice.ItemList:
         return [invoice]
@@ -44,19 +55,20 @@ def check_mixed_tax_split(invoice: EisCasInvoice) -> List[EisCasInvoice]:
         cls = _classify_line_item(item)
         groups.setdefault(cls, []).append(item)
 
-    # If only one tax group exists, no splitting required
+    # If only one tax group exists, assign correct TransClass and return single invoice
     if len(groups) <= 1:
+        tax_class = next(iter(groups.keys()))
+        expected_trans_class = _TAX_CLASS_CODE_MAP.get(tax_class, EisTransClass.VATABLE.value)
+        if invoice.TransClass != expected_trans_class:
+            return [invoice.model_copy(update={"TransClass": expected_trans_class})]
         return [invoice]
 
     split_invoices: List[EisCasInvoice] = []
-    suffix_index = 0
-    suffixes = ["A", "B", "C", "D", "E"]
+    prefix_16 = invoice.EisUniqueId[:16]
+    seq_suffix = invoice.EisUniqueId[16:] if len(invoice.EisUniqueId) >= 24 else "00000000"
 
-    for tax_class, items in groups.items():
-        suffix = suffixes[suffix_index] if suffix_index < len(suffixes) else str(suffix_index + 1)
-        suffix_index += 1
-
-        # Sum line item net sales
+    for idx, (tax_class, items) in enumerate(groups.items()):
+        # Sum line item net sales for this group
         group_net_sales = sum(item.NetSales for item in items)
 
         # Pro-rate discount if applicable or retain proportional discount
@@ -64,7 +76,7 @@ def check_mixed_tax_split(invoice: EisCasInvoice) -> List[EisCasInvoice]:
         ratio = group_net_sales / total_orig_sales if total_orig_sales > 0 else Decimal("1.0")
         group_sales_after_discount = (invoice.TotNetSalesAftDisct * ratio).quantize(Decimal("0.01"))
 
-        # Calculate VAT based on category
+        # Calculate VAT based on category (12% for VATable, 0.00 for Zero-Rated & Exempt)
         if tax_class == "VATABLE":
             group_vat = (group_sales_after_discount * Decimal("0.12")).quantize(Decimal("0.01"))
         else:
@@ -72,17 +84,22 @@ def check_mixed_tax_split(invoice: EisCasInvoice) -> List[EisCasInvoice]:
 
         group_net_payable = (group_sales_after_discount + group_vat).quantize(Decimal("0.01"))
 
-        # Construct suffixed Unique ID (max 24 characters)
-        base_unique_id = invoice.EisUniqueId
-        if len(base_unique_id) > 22:
-            base_unique_id = base_unique_id[:22]
-        new_unique_id = f"{base_unique_id}-{suffix}"
+        # Construct strictly 24-character alphanumeric Unique ID (no hyphens)
+        if seq_suffix.isdigit():
+            base_num = int(seq_suffix)
+            new_seq = f"{(base_num + idx):08d}"[-8:]
+        else:
+            new_seq = f"{seq_suffix[:7]}{idx + 1}"[:8]
+        new_unique_id = f"{prefix_16}{new_seq}"
 
-        # Create cloned invoice for this tax bucket
+        trans_class_code = _TAX_CLASS_CODE_MAP.get(tax_class, EisTransClass.VATABLE.value)
+
+        # Cloned invoice: CompInvoiceId remains identical per BIR Section 5.2
         cloned_invoice = invoice.model_copy(
             update={
                 "EisUniqueId": new_unique_id,
-                "CompInvoiceId": f"{invoice.CompInvoiceId}-{suffix}",
+                "CompInvoiceId": invoice.CompInvoiceId,
+                "TransClass": trans_class_code,
                 "ItemList": items,
                 "TotNetItemSales": group_net_sales,
                 "TotNetSalesAftDisct": group_sales_after_discount,
