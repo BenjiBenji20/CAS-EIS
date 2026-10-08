@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import List, Literal, Optional
 from uuid import UUID
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 from base.schema import BaseSchema
 from core.settings import settings
@@ -32,10 +32,10 @@ class EisBirBaseModel(BaseModel):
 
 
 class EisSellerInfo(EisBirBaseModel):
-    """Seller registered tax info (BIR Guide Section 4.1, Page 12)."""
+    """Seller registered tax info (BIR Guide Section 4.1, Page 12; CAS Format Excel Row 22)."""
     Tin: str = Field(..., max_length=9, description="Seller registered TIN without branch code")
     BranchCd: str = Field(..., max_length=5, description="5-digit zero-padded branch code")
-    Type: str = Field(..., max_length=1, description="1: Single Proprietor, 2: Non-Individual/Corporate")
+    Type: str = Field(..., max_length=1, description="0: VAT registered, 1: Non-VAT registered")
     RegNm: str = Field(..., max_length=200, description="Registered Name")
     BusinessNm: str = Field(..., max_length=200, description="Trade/Business Name")
     Email: Optional[str] = Field(None, max_length=100, description="Seller email address")
@@ -48,11 +48,21 @@ class EisSellerInfo(EisBirBaseModel):
             return str(v).strip().zfill(5)[:5]
         return v
 
+    @field_validator("Type")
+    @classmethod
+    def validate_seller_type(cls, v: str) -> str:
+        val = str(v).strip()
+        if val not in ("0", "1"):
+            raise ValueError(
+                f"SellerInfo.Type must be '0' (VAT registered) or '1' (Non-VAT registered), received: '{v}'"
+            )
+        return val
+
 
 class EisBuyerInfo(EisBirBaseModel):
-    """Buyer tax info & proof of delivery (BIR Guide Section 4.1, Pages 13-14)."""
-    Tin: str = Field(..., max_length=9, description="Buyer TIN")
-    BranchCd: str = Field(..., max_length=9, description="Buyer Branch Code")
+    """Buyer tax info & proof of delivery (BIR Guide Section 4.1, Pages 13-14; CAS Format Excel Row 28-38)."""
+    Tin: str = Field(..., max_length=9, description="Buyer TIN (use '000000000' if unregistered)")
+    BranchCd: str = Field(default="00000", max_length=5, description="5-digit zero-padded branch code")
     RegNm: str = Field(..., max_length=200, description="Buyer Registered Name")
     BusinessNm: str = Field(..., max_length=200, description="Buyer Trade/Business Name")
     Email: Optional[str] = Field(None, max_length=100, description="Buyer email address")
@@ -67,13 +77,13 @@ class EisBuyerInfo(EisBirBaseModel):
 
     @field_validator("BranchCd", mode="before")
     @classmethod
-    def pad_branch_code(cls, v: str) -> str:
+    def pad_branch_code(cls, v: Optional[str]) -> str:
         if v is not None:
             val_str = str(v).strip()
             if len(val_str) > 0 and len(val_str) < 5 and val_str.isdigit():
                 return val_str.zfill(5)
-            return val_str[:9]
-        return v
+            return val_str[:5]
+        return "00000"
 
 
 class EisLineItem(EisBirBaseModel):
@@ -112,9 +122,14 @@ class EisCasInvoice(EisBirBaseModel):
     IssueDtm: str = Field(..., max_length=8, description="Issuance date in YYYYMMDD format")
 
     # BIR e-Invoice Basic Information
-    EisUniqueId: str = Field(..., max_length=24, description="BIR Unique ID ({accreditationId}-{YYYYMMDD}-{seq})")
-    DocType: str = Field(..., max_length=2, description="Document type (01=SI, 02=OR, 03=SB, 04=DM, 05=CM)")
-    TransClass: str = Field(..., max_length=2, description="Transaction classification (01=B2B, 02=B2C, 03=B2G, 04=Export)")
+    EisUniqueId: str = Field(
+        ...,
+        min_length=24,
+        max_length=24,
+        description="BIR Unique ID: 24 alphanumeric digits (YYYYMMDD [8] + Accreditation ID [8] + Control/Sequence [8])"
+    )
+    DocType: str = Field(..., max_length=2, description="Document type (01=SI, 02=DM, 03=CM, 04=SB, 05=OR)")
+    TransClass: str = Field(..., max_length=2, description="Tax classification (01=VATable, 02=Zero-Rated, 03=Exempt)")
 
     # Invoice Correction fields
     CorrYN: Literal["Y", "N"] = Field(..., max_length=1, description="Correction flag: 'Y' or 'N'")
@@ -184,15 +199,37 @@ class EisCasInvoice(EisBirBaseModel):
             raise ValueError(f"IssueDtm must be 8 digits in YYYYMMDD format, received: {v}")
         return val_str
 
+    @field_validator("EisUniqueId")
+    @classmethod
+    def validate_eis_unique_id(cls, v: str) -> str:
+        val_str = v.strip()
+        if len(val_str) != 24 or not val_str.isalnum():
+            raise ValueError(
+                f"EisUniqueId must be exactly 24 alphanumeric characters without hyphens, received: '{v}'"
+            )
+        return val_str
+
     @field_validator("PtuNum", mode="before")
     @classmethod
     def default_ptu_num(cls, v: Optional[str]) -> str:
-        if not v:
-            val = settings.EIS_PTU_NUM or ""
-            if not val:
-                return "UNREGISTERED-PTU"
-            return val
-        return str(v).strip()
+        val = str(v).strip() if v else (settings.EIS_PTU_NUM or "").strip()
+        if not val:
+            return "UNREGISTERED-PTU"
+        return val[:50]
+
+    @model_validator(mode="after")
+    def validate_bir_corrections(self) -> "EisCasInvoice":
+        if self.CorrYN == "Y":
+            if not self.CorrectionCd or self.CorrectionCd not in ("01", "02"):
+                raise ValueError("CorrectionCd ('01'=Cancel, '02'=Modify) is mandatory when CorrYN is 'Y'")
+            if not self.PrevUniqueId or len(self.PrevUniqueId) != 24:
+                raise ValueError("PrevUniqueId must be exactly 24 characters when CorrYN is 'Y'")
+        else:
+            if self.CorrectionCd:
+                self.CorrectionCd = ""
+            if self.PrevUniqueId:
+                self.PrevUniqueId = ""
+        return self
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -208,7 +245,7 @@ class EisTransmissionItemResponse(BaseSchema):
     """Per-invoice result status from BIR EIS audit log."""
     id: UUID
     eis_unique_id: str
-    comp_invoice_id: str
+    comp_invoice_id: Optional[str] = None
     result_status: EisResultStatus
     fail_reason_code: Optional[str] = None
     fail_message: Optional[str] = None
