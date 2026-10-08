@@ -52,14 +52,14 @@ def sample_invoice():
     return EisCasInvoice(
         CompInvoiceId="INV-2026-0001",
         IssueDtm="20261003",
-        EisUniqueId="ACC123-20261003-00000001",
-        DocType="1",
-        TransClass="1",
+        EisUniqueId="2026100320146IT400000001",
+        DocType="01",
+        TransClass="01",
         CorrYN="N",
         SellerInfo=EisSellerInfo(
             Tin="123456789",
             BranchCd="1",
-            Type="2",
+            Type="0",
             RegNm="Acme Corporation",
             BusinessNm="Acme Trading",
             RegAddr="123 Ayala Ave, Makati City",
@@ -225,12 +225,71 @@ class TestEisSplitter:
 
         split_list = check_mixed_tax_split(inv)
         assert len(split_list) == 2
-        # Check suffixes
-        assert split_list[0].EisUniqueId.endswith("-A")
-        assert split_list[1].EisUniqueId.endswith("-B")
+        # Check CompInvoiceId remains identical per BIR Section 5.2
+        assert split_list[0].CompInvoiceId == "INV-2026-0001"
+        assert split_list[1].CompInvoiceId == "INV-2026-0001"
+        # Check 24-char EisUniqueId format
+        assert len(split_list[0].EisUniqueId) == 24
+        assert len(split_list[1].EisUniqueId) == 24
+        assert split_list[0].EisUniqueId != split_list[1].EisUniqueId
+        # Check TransClass assignment
+        assert split_list[0].TransClass == "01"  # VATable
+        assert split_list[1].TransClass == "02"  # Zero-Rated
         # Item A: VATABLE
         assert split_list[0].VATAmt == Decimal("12.00")
         assert split_list[0].NetAmtPay == Decimal("112.00")
         # Item B: ZERO_RATED (0% VAT)
         assert split_list[1].VATAmt == Decimal("0.00")
         assert split_list[1].NetAmtPay == Decimal("200.00")
+
+    def test_doc_type_and_trans_class_enums(self):
+        # BIR CAS v2.01 doc types
+        assert EisDocType.SI.value == "01"
+        assert EisDocType.DM.value == "02"
+        assert EisDocType.CM.value == "03"
+        assert EisDocType.SB.value == "04"
+        assert EisDocType.OR.value == "05"
+
+        # BIR CAS v2.01 tax classes
+        assert EisTransClass.VATABLE.value == "01"
+        assert EisTransClass.ZERO_RATED.value == "02"
+        assert EisTransClass.EXEMPT.value == "03"
+
+    def test_eis_result_status_from_bir_code(self):
+        assert EisResultStatus.from_bir_code("SUC001") == EisResultStatus.SUCCESS
+        assert EisResultStatus.from_bir_code("SYN004") == EisResultStatus.SYNTAX_ERROR
+        assert EisResultStatus.from_bir_code("ERR001") == EisResultStatus.RULE_ERROR
+        assert EisResultStatus.from_bir_code("unknown") == EisResultStatus.RULE_ERROR
+
+    def test_invoice_correction_validation(self, sample_invoice):
+        # Valid correction
+        valid_data = {
+            **sample_invoice.model_dump(),
+            "CorrYN": "Y",
+            "CorrectionCd": "01",
+            "PrevUniqueId": "2026100120146IT400000001",
+        }
+        corr_inv = EisCasInvoice.model_validate(valid_data)
+        assert corr_inv.CorrYN == "Y"
+        assert corr_inv.CorrectionCd == "01"
+        assert corr_inv.PrevUniqueId == "2026100120146IT400000001"
+
+        # Missing CorrectionCd when CorrYN == 'Y' should fail
+        with pytest.raises(ValueError):
+            invalid_data = {
+                **sample_invoice.model_dump(),
+                "CorrYN": "Y",
+                "CorrectionCd": None,
+                "PrevUniqueId": "2026100120146IT400000001",
+            }
+            EisCasInvoice.model_validate(invalid_data)
+
+        # Invalid PrevUniqueId length when CorrYN == 'Y' should fail
+        with pytest.raises(ValueError):
+            invalid_data2 = {
+                **sample_invoice.model_dump(),
+                "CorrYN": "Y",
+                "CorrectionCd": "01",
+                "PrevUniqueId": "SHORT-ID",
+            }
+            EisCasInvoice.model_validate(invalid_data2)

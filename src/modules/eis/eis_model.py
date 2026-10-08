@@ -90,7 +90,7 @@ class EisTransmissionItem(Base, TimestampMixin):
         nullable=False,
     )
     eis_unique_id: Mapped[str] = mapped_column(String(24), index=True, nullable=False)
-    comp_invoice_id: Mapped[str] = mapped_column(String(50), nullable=False)
+    comp_invoice_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
     result_status: Mapped[EisResultStatus] = mapped_column(
         Enum(EisResultStatus, native_enum=True),
