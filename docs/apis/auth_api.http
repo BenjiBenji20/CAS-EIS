@@ -6,8 +6,8 @@ Content-Type: application/json
 X-Header: {{secret_header_value}}
 
 {
-    "username": "new_user_test",
-    "email": "new_user@system.local",
+    "username": "superadmin",
+    "email": "superadmin@ussci.com",
     "plain_password": "Password@123"
 }
 
@@ -24,7 +24,7 @@ X-Header: {{secret_header_value}}
 
 {
     "username": "superadmin",
-    "plain_password": "Admin@123456"
+    "plain_password": "Password@123"
 }
 
 
@@ -36,3 +36,24 @@ POST {{host}}/api/public/auth/refresh-token
 Content-Type: application/json
 X-Header: {{secret_header_value}}
 # Cookie: refresh_token=YOUR_REFRESH_TOKEN_HERE
+
+
+###
+# 4. Concurrent Login Test (Single Active Session Verification - Option B Exclusive Lock)
+# Execute this while request #2 is still active (within 30 mins idle window).
+# Expected Response: HTTP 409 Conflict
+# {
+#     "status": false,
+#     "description": "Unable to complete sign in. An active session is currently in progress for this account.",
+#     "error": {
+#         "code": "ACTIVE_SESSION_EXISTS"
+#     }
+# }
+POST {{host}}/api/public/auth/auth-tokens
+Content-Type: application/json
+X-Header: {{secret_header_value}}
+
+{
+    "username": "superadmin",
+    "plain_password": "Password@123"
+}

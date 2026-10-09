@@ -17,6 +17,7 @@ This authentication and authorization subsystem is designed as an enterprise-gra
 - **Refresh Token Rotation (RTR) & Instant Invalidation**: On every token refresh request (`POST /api/public/auth/refresh-token`), **both** access and refresh tokens are rotated. Presenting an old or previously used refresh token triggers automatic reuse detection, immediately revoking the session across PostgreSQL and Redis.
 - **Database I/O Throttling (Fast-Path Architecture)**: Token refresh operations validate against a single authoritative Redis cache in **0.5ms**. Database updates (rotating hashes and timestamp synchronization) are offloaded to non-blocking background tasks (`asyncio.create_task`) using dedicated async sessions (`postgres_client_async_session`), eliminating DB I/O overhead from the request-response hot path.
 - **Granular IP + Username Lockout Model**: Brute-force protection tracks failed attempts per `(IP, Username)` pair in Redis. Blocking 5 failed attempts locks out only the offending IP-username combination, preventing cross-IP Denial of Service (DoS) attacks on legitimate users.
+- **Single Active Session Enforcement (Option B Exclusive Lock & BIR Annex B Item 11.b Compliance)**: Strictly restricts a user account from concurrent active sessions across multiple terminals. On login, if an active session exists that was active within the idle window (`SESSION_IDLE_TIMEOUT_SEC` = 30 minutes), the second login is rejected with HTTP 409 Conflict (`ACTIVE_SESSION_EXISTS`). If the previous session has been idle for > 30 minutes (e.g. browser closed or computer rebooted), it is automatically retired, allowing the new sign-in without administrative lockout.
 - **Zero Raw Secret Exposure**: Plaintext passwords are never stored; they are hashed using **Argon2id** via `pwdlib`. Both access and refresh tokens are hashed using SHA-256 before storage in session payloads and database tables.
 
 ---
@@ -27,14 +28,14 @@ The authentication system is structured into strict architectural layers located
 
 | Layer | Primary Files | Key Responsibilities & Line References |
 | :--- | :--- | :--- |
-| **API Routers** | [auth_router.py](file:///c:/Users/imper/Documents/ussci/erp/src/modules/authentication/auth_router.py) | Exposes public auth endpoints, sets HTTP-Only cookies for access & refresh tokens, extracts request headers (`X-Forwarded-For`, `User-Agent`). See [auth_router.py:L19-L134](file:///c:/Users/imper/Documents/ussci/erp/src/modules/authentication/auth_router.py#L19-L134). |
-| **Service Layer** | [auth_service.py](file:///c:/Users/imper/Documents/ussci/erp/src/modules/authentication/auth_service.py) | Orchestrates Argon2id password hashing, IP+Username brute-force lockout, dual JWT generation, session creation, Refresh Token Rotation (RTR), and background DB sync. See [auth_service.py:L32-L638](file:///c:/Users/imper/Documents/ussci/erp/src/modules/authentication/auth_service.py#L32-L638). |
-| **Edge Middleware** | [jwt_validator.py](file:///c:/Users/imper/Documents/ussci/erp/src/middlewares/jwt_validator.py) | Zero-DB, 3-layer validation middleware injecting pre-verified claims into `request.state` for private routes. See [jwt_validator.py:L16-L183](file:///c:/Users/imper/Documents/ussci/erp/src/middlewares/jwt_validator.py#L16-L183). |
-| **Security Guards** | [current_user.py](file:///c:/Users/imper/Documents/ussci/erp/src/dependencies/current_user.py) | FastAPI dependencies for protected endpoints: `get_current_user_id` ([L17-L68](file:///c:/Users/imper/Documents/ussci/erp/src/dependencies/current_user.py#L17-L68)) leveraging `request.state`, and ABAC profile completion guard `require_user_profile_and_get_id` ([L70-L108](file:///c:/Users/imper/Documents/ussci/erp/src/dependencies/current_user.py#L70-L108)). |
-| **Domain Models** | [auth_model.py](file:///c:/Users/imper/Documents/ussci/erp/src/modules/authentication/auth_model.py)<br>[session_model.py](file:///c:/Users/imper/Documents/ussci/erp/src/modules/session/session_model.py) | SQLAlchemy ORM models for users, roles, permissions, junction tables, and session audit logs. See [auth_model.py:L26-L174](file:///c:/Users/imper/Documents/ussci/erp/src/modules/authentication/auth_model.py#L26-L174) & [session_model.py:L15-L46](file:///c:/Users/imper/Documents/ussci/erp/src/modules/session/session_model.py#L15-L46). |
-| **Repositories** | [auth_repository.py](file:///c:/Users/imper/Documents/ussci/erp/src/modules/authentication/auth_repository.py)<br>[session_repo.py](file:///c:/Users/imper/Documents/ussci/erp/src/modules/session/session_repo.py) | Async database access abstractions for user credentials and active session state. |
-| **Enums & Constants** | [enums.py](file:///c:/Users/imper/Documents/ussci/erp/src/shares/enums.py) | Standardized system permission strings formatted as `MODULE:RESOURCE:ACTION`. See [enums.py:L9-L62](file:///c:/Users/imper/Documents/ussci/erp/src/shares/enums.py#L9-L62). |
-| **Cache Utilities** | [maintain_cache_key.py](file:///c:/Users/imper/Documents/ussci/erp/src/utils/maintain_cache_key.py) | Redis key generators, IP+Username failed login tracking, and profile completion status caching. See [maintain_cache_key.py:L8-L92](file:///c:/Users/imper/Documents/ussci/erp/src/utils/maintain_cache_key.py#L8-L92). |
+| **API Routers** | [auth_router.py](file:///c:/Users/imper/Downloads/universal/erp/src/modules/authentication/auth_router.py) | Exposes public auth endpoints, sets HTTP-Only cookies for access & refresh tokens, extracts request headers (`X-Forwarded-For`, `User-Agent`). See [auth_router.py:L19-L134](file:///c:/Users/imper/Downloads/universal/erp/src/modules/authentication/auth_router.py#L19-L134). |
+| **Service Layer** | [auth_service.py](file:///c:/Users/imper/Downloads/universal/erp/src/modules/authentication/auth_service.py) | Orchestrates Argon2id password hashing, IP+Username brute-force lockout, single active session concurrency guard, dual JWT generation, session creation, Refresh Token Rotation (RTR), and background DB sync. See [auth_service.py](file:///c:/Users/imper/Downloads/universal/erp/src/modules/authentication/auth_service.py). |
+| **Edge Middleware** | [jwt_validator.py](file:///c:/Users/imper/Downloads/universal/erp/src/middlewares/jwt_validator.py) | Zero-DB, 3-layer validation middleware injecting pre-verified claims into `request.state` for private routes. See [jwt_validator.py](file:///c:/Users/imper/Downloads/universal/erp/src/middlewares/jwt_validator.py). |
+| **Security Guards** | [current_user.py](file:///c:/Users/imper/Downloads/universal/erp/src/dependencies/current_user.py) | FastAPI dependencies for protected endpoints: `get_current_user_id` leveraging `request.state`, and ABAC profile completion guard `require_user_profile_and_get_id`. |
+| **Domain Models** | [auth_model.py](file:///c:/Users/imper/Downloads/universal/erp/src/modules/authentication/auth_model.py)<br>[session_model.py](file:///c:/Users/imper/Downloads/universal/erp/src/modules/session/session_model.py) | SQLAlchemy ORM models for users, roles, permissions, junction tables, and session audit logs. |
+| **Repositories** | [auth_repository.py](file:///c:/Users/imper/Downloads/universal/erp/src/modules/authentication/auth_repository.py)<br>[session_repo.py](file:///c:/Users/imper/Downloads/universal/erp/src/modules/session/session_repo.py) | Async database access abstractions for user credentials and active session state (`get_active_session_by_user_id`, `deactivate_session_by_id`). |
+| **Enums & Constants** | [enums.py](file:///c:/Users/imper/Downloads/universal/erp/src/shares/enums.py) | Standardized system permission strings formatted as `MODULE:RESOURCE:ACTION`. |
+| **Cache Utilities** | [maintain_cache_key.py](file:///c:/Users/imper/Downloads/universal/erp/src/utils/maintain_cache_key.py) | Redis key generators, IP+Username failed login tracking, and profile completion status caching. |
 
 ---
 
@@ -154,11 +155,19 @@ flowchart TD
     
     K -->|Password Valid| P[Clear failed_login state in Redis for ip:username]
     P --> Q[Check User Profile Completion]
-    Q --> R[Generate Access JWT & Refresh JWT]
-    R --> S[Compute SHA-256 Hashes of Both Tokens]
-    S --> T[Save Session in PostgreSQL session.sessions]
-    T --> U[Cache Session Payload in Redis<br/>sessions:sid:user:uid]
-    U --> V[Return Auth Payload & Set HTTP-Only Cookies]
+    Q --> R{Check Active Session in DB<br/>get_active_session_by_user_id}
+    
+    R -->|No Active Session| S[Generate Access JWT & Refresh JWT]
+    R -->|Active Session Exists| T{now - last_active_at <= 30 mins?<br/>SESSION_IDLE_TIMEOUT_SEC}
+    
+    T -->|Yes: Recent / Active Terminal| U[Raise 409 Conflict: ACTIVE_SESSION_EXISTS<br/>Generic Message: Active session in progress]
+    T -->|No: Stale / Abandoned Session| V[Auto-retire Old Session in DB & Redis<br/>Set is_active = False]
+    V --> S
+    
+    S --> W[Compute SHA-256 Hashes of Both Tokens]
+    W --> X[Save Session in PostgreSQL session.sessions]
+    X --> Y[Cache Session Payload in Redis<br/>sessions:sid:user:uid]
+    Y --> Z[Return Auth Payload & Set HTTP-Only Cookies]
 ```
 
 ---
@@ -211,10 +220,20 @@ sequenceDiagram
     Service->>DB: Fetch user by username
     Service->>Cache: Check is_ip_user_blocked(ip, username)
     Service->>Service: Verify Argon2id password hash
-    Service->>DB: Insert UserSession (refresh_token_hash)
-    Service->>Cache: Save session payload (access_token_hash & refresh_token_hash)
-    Service-->>Router: UserAuthenticationResponse
-    Router-->>Client: 200 OK + Set Cookies (access_token, refresh_token)
+    Service->>DB: Check get_active_session_by_user_id (Exclusive Lock)
+    opt Active Session Exists & Idle > 30m
+        Service->>DB: Deactivate stale session (is_active = False)
+        Service->>Cache: Delete stale Redis session key
+    end
+    alt Active Session Exists & Idle <= 30m
+        Service-->>Router: 409 Conflict (ACTIVE_SESSION_EXISTS)
+        Router-->>Client: 409 Conflict
+    else No Active Session or Stale Retired
+        Service->>DB: Insert UserSession (refresh_token_hash)
+        Service->>Cache: Save session payload (access_token_hash & refresh_token_hash)
+        Service-->>Router: UserAuthenticationResponse
+        Router-->>Client: 200 OK + Set Cookies (access_token, refresh_token)
+    end
 
     Note over Client, DB: 2. Edge Middleware Protected Route Access
     Client->>MW: GET /api/private/resource (Cookies / Bearer Header)

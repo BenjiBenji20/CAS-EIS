@@ -28,11 +28,19 @@ flowchart TD
     
     K -->|Password Valid| P[Clear failed_login state in Redis for ip:username]
     P --> Q[Check User Profile Completion]
-    Q --> R[Generate Access JWT & Refresh JWT]
-    R --> S[Compute SHA-256 Hashes of Both Tokens]
-    S --> T[Save Session in PostgreSQL session.sessions]
-    T --> U[Cache Session Payload in Redis<br/>sessions:sid:user:uid]
-    U --> V[Return Auth Payload & Set HTTP-Only Cookies]
+    Q --> R{Check Active Session in DB<br/>get_active_session_by_user_id}
+    
+    R -->|No Active Session| S[Generate Access JWT & Refresh JWT]
+    R -->|Active Session Exists| T{now - last_active_at <= 30 mins?<br/>SESSION_IDLE_TIMEOUT_SEC}
+    
+    T -->|Yes: Recent / Active Terminal| U[Raise 409 Conflict: ACTIVE_SESSION_EXISTS<br/>Generic Message: Active session in progress]
+    T -->|No: Stale / Abandoned Session| V[Auto-retire Old Session in DB & Redis<br/>Set is_active = False]
+    V --> S
+    
+    S --> W[Compute SHA-256 Hashes of Both Tokens]
+    W --> X[Save Session in PostgreSQL session.sessions]
+    X --> Y[Cache Session Payload in Redis<br/>sessions:sid:user:uid]
+    Y --> Z[Return Auth Payload & Set HTTP-Only Cookies]
 ```
 
 ---

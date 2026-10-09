@@ -47,3 +47,56 @@ async def test_deactivate_token_db_exception_raises_internal_server_exception():
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.error_code == "SESSION_UPDATE_FAILED"
+
+
+@pytest.mark.asyncio
+async def test_get_active_session_by_user_id_found():
+    """Test get_active_session_by_user_id returns active session."""
+    from uuid import uuid4
+    mock_db = AsyncMock()
+    mock_result = MagicMock()
+    mock_session = MagicMock()
+    mock_result.scalar_one_or_none.return_value = mock_session
+    mock_db.execute.return_value = mock_result
+
+    repo = UserSessionRepository(db=mock_db)
+    user_id = uuid4()
+    result = await repo.get_active_session_by_user_id(user_id)
+
+    mock_db.execute.assert_awaited_once()
+    assert result == mock_session
+
+
+@pytest.mark.asyncio
+async def test_get_active_session_by_user_id_not_found():
+    """Test get_active_session_by_user_id returns None when no active session."""
+    from uuid import uuid4
+    mock_db = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = None
+    mock_db.execute.return_value = mock_result
+
+    repo = UserSessionRepository(db=mock_db)
+    result = await repo.get_active_session_by_user_id(uuid4())
+
+    mock_db.execute.assert_awaited_once()
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_deactivate_session_by_id_success():
+    """Test deactivate_session_by_id updates and returns session."""
+    from uuid import uuid4
+    mock_db = AsyncMock()
+    mock_result = MagicMock()
+    mock_session = MagicMock()
+    mock_result.scalar_one_or_none.return_value = mock_session
+    mock_db.execute.return_value = mock_result
+
+    repo = UserSessionRepository(db=mock_db)
+    session_id = uuid4()
+    result = await repo.deactivate_session_by_id(session_id)
+
+    mock_db.execute.assert_awaited_once()
+    mock_db.flush.assert_awaited_once()
+    assert result == mock_session

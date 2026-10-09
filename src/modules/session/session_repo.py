@@ -1,11 +1,12 @@
 from datetime import datetime, timezone
 from typing import Optional
+from uuid import UUID
 
 from db.db_session import get_async_db
 from exceptions.app_exception import InternalServerException
 from fastapi import Depends
 from loguru import logger
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from base.repository import BaseRepository
@@ -54,5 +55,53 @@ class UserSessionRepository(BaseRepository[UserSession]):
             raise InternalServerException(
                 message="Failed to update session status",
                 error_code="SESSION_UPDATE_FAILED",
-            )     
+            )
+
+    async def get_active_session_by_user_id(
+        self, user_id: UUID
+    ) -> Optional[UserSession]:
+        """Fetch the most recent active, unexpired session for a user."""
+        try:
+            stmt = (
+                select(UserSession)
+                .where(
+                    UserSession.user_id == user_id,
+                    UserSession.is_active.is_(True),
+                    UserSession.expires_at > datetime.now(timezone.utc),
+                )
+                .order_by(UserSession.last_active_at.desc())
+                .limit(1)
+            )
+            result = await self.db.execute(stmt)
+            return result.scalar_one_or_none()
+        except Exception as e:
+            logger.error(f"Error querying active session for user {user_id}: {e}")
+            raise InternalServerException(
+                message="Failed to retrieve active session status",
+                error_code="SESSION_QUERY_FAILED",
+            )
+
+    async def deactivate_session_by_id(
+        self, session_id: UUID
+    ) -> Optional[UserSession]:
+        """Deactivate an active session by its ID."""
+        try:
+            stmt = (
+                update(UserSession)
+                .where(
+                    UserSession.id == session_id,
+                    UserSession.is_active.is_(True),
+                )
+                .values(is_active=False)
+                .returning(UserSession)
+            )
+            result = await self.db.execute(stmt)
+            await self.db.flush()
+            return result.scalar_one_or_none()
+        except Exception as e:
+            logger.error(f"Error deactivating session {session_id}: {e}")
+            raise InternalServerException(
+                message="Failed to update session status",
+                error_code="SESSION_UPDATE_FAILED",
+            )
             
