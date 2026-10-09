@@ -1,3 +1,4 @@
+import json
 from loguru import logger
 from fastapi import Depends
 import redis.asyncio as aioredis
@@ -73,6 +74,50 @@ class MaintainCacheKeyUtils:
     
     def create_cache_name(self, user_id: str) -> str:
         return f"user:sessions:{user_id}"
+
+    
+    def create_user_permission_cache_key(self, user_id: str) -> str:
+        """
+        Key Pattern: 'user_permission:{user_id}'
+        
+        Set Location:
+        - modules/rbac/rbac_service.py -> RBACService.get_or_cache_user_permissions()
+        
+        Read Location:
+        - dependencies/rbac_guard.py -> require_permission(), require_role(), require_any_permission()
+        
+        Invalidate Location:
+        - modules/rbac/rbac_service.py -> RBACService.invalidate_user_permissions()
+        """
+        return f"user_permission:{user_id}"
+
+    async def cache_user_permissions(self, user_id: str, payload: dict):
+        """
+        Caches user roles and permission codes in Redis.
+        Called by RBACService when warming cache on cache miss.
+        """
+        key = self.create_user_permission_cache_key(user_id)
+        try:
+            serialized_payload = json.dumps(payload, default=str)
+            await self.async_cache.set(
+                name=key,
+                value=serialized_payload,
+                ex=settings.REFRESH_JWT_EXPIRY_SEC
+            )
+        except Exception as e:
+            logger.warning(f"Failed to cache user permissions for user {user_id} in Redis: {e}")
+
+    async def invalidate_user_permission_cache(self, user_id: str):
+        """
+        Invalidates user permissions cache in Redis.
+        Called by Superadmin endpoints when assigning/revoking roles or permissions.
+        """
+        key = self.create_user_permission_cache_key(user_id)
+        try:
+            await self.async_cache.delete(key)
+            logger.info(f"Invalidated user permission cache in Redis for user {user_id}")
+        except Exception as e:
+            logger.warning(f"Failed to invalidate user permission cache for user {user_id} in Redis: {e}")
 
     async def is_ip_user_blocked(self, ip: str, username: str) -> bool:
         """Check if specific (IP, Username) pair is currently locked out in Redis."""
