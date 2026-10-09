@@ -45,7 +45,7 @@ class UserSessionRepository(BaseRepository[UserSession]):
             )
 
             result = await self.db.execute(stmt)
-            await self.db.flush()
+            await self.db.commit()
 
             # Returns the updated UserSession instance, or None if no match was found/updated
             return result.scalar_one_or_none()
@@ -98,7 +98,7 @@ class UserSessionRepository(BaseRepository[UserSession]):
                 .returning(UserSession)
             )
             result = await self.db.execute(stmt)
-            await self.db.flush()
+            await self.db.commit()
             return result.scalar_one_or_none()
         except Exception as e:
             logger.error(f"Error deactivating session {session_id}: {e}")
@@ -122,7 +122,7 @@ class UserSessionRepository(BaseRepository[UserSession]):
                 .returning(UserSession.id)
             )
             result = await self.db.execute(stmt)
-            await self.db.flush()
+            await self.db.commit()
             deactivated_ids = result.scalars().all()
             return len(deactivated_ids)
         except Exception as e:
@@ -143,7 +143,7 @@ class UserSessionRepository(BaseRepository[UserSession]):
                 .join(UserSession.user)
                 .options(
                     joinedload(UserSession.user).joinedload(User.profile),
-                    selectinload(UserSession.user).selectinload(User.roles),
+                    joinedload(UserSession.user).selectinload(User.roles),
                 )
                 .where(
                     UserSession.is_active.is_(True),
