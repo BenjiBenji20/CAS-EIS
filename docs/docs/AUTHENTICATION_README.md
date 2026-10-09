@@ -346,3 +346,47 @@ Defined in [settings.py](file:///c:/Users/imper/Documents/ussci/erp/src/core/set
 - `REFRESH_JWT_EXPIRY_SEC`: Refresh token lifespan (e.g. 604800s / 7 days).
 - `COOKIE_SECURE`: `True` in production (enforces HTTPS), `False` in local dev.
 - `COOKIE_SAMESITE`: SameSite cookie policy (`lax` or `strict`).
+
+---
+
+## 9. Session Lifecycle & Administrative Overrides (BIR CAS Annex B Item 11.b)
+
+The session module (`src/modules/session/`) manages individual terminal sessions and provides administrative overrides for active connections:
+
+### Endpoints
+1. **User Own Logout**: `POST /api/private/session/logout`
+   - Gracefully ends the calling user's active session in PostgreSQL (`is_active = False`) and evicts the session cache from Redis.
+   - Clears HTTP-Only authentication cookies (`access_token`, `refresh_token`).
+2. **Admin List All Active Sessions Across All Users**: `GET /api/private/admin/sessions`
+   - Guarded by `require_role(RoleName.SUPER_ADMIN, RoleName.ADMIN)`.
+   - Returns all active terminal sessions enterprise-wide joined with user identity and profile data (`user_id`, `username`, `email`, `roles`, `full_name`, IP address, user-agent, creation date, and last active timestamp) for centralized monitoring, audit, and client-side searching.
+3. **Admin Force Logout by Session UUID**: `DELETE /api/private/admin/sessions/{session_id}`
+   - Guarded by `require_role(RoleName.SUPER_ADMIN, RoleName.ADMIN)`.
+   - Immediately revokes a target terminal session. Any subsequent request from that terminal receives an immediate 401 Unauthorized.
+4. **Admin Mass Logout with Sudo Verification**: `POST /api/private/admin/users/{user_id}/sessions/terminate-all`
+   - Guarded by `require_role(RoleName.SUPER_ADMIN, RoleName.ADMIN)` and `verify_sudo_credential`.
+   - Requires the executing administrator to supply their own `admin_password` in the JSON request body.
+   - Prevents unauthorized mass evictions from unattended administrator workstations.
+   - Bulk invalidates all active sessions in PostgreSQL and purges all related keys from Redis.
+
+---
+
+## 10. Administrative User Approval Lifecycle (BIR CAS Annex B Item 11.a)
+
+Under BIR CAS regulations, newly registered accounts cannot immediately access financial modules or records without prior administrative authorization:
+
+### Workflow
+1. **Public Registration**: `POST /api/public/auth/registration`
+   - User account is created with `status = PENDING`.
+   - Login attempts are blocked with `HTTP 403 Forbidden` ("Account is not in active status").
+2. **Pending Users Inspection**: `GET /api/private/admin/users/pending`
+   - Guarded by `require_permission(SystemPermission.AUTHENTICATION_USER_READ)`.
+   - Returns registered users awaiting administrative vetting.
+3. **Account Approval**: `POST /api/private/admin/users/{user_id}/approve`
+   - Guarded by `require_permission(SystemPermission.AUTHENTICATION_REGISTRATION_ACCEPT)`.
+   - Transitions status to `ACTIVE` and assigns an initial system role (default: `STAFF_USER`).
+4. **Account Rejection & Soft Deactivation**: `POST /api/private/admin/users/{user_id}/reject`
+   - Guarded by `require_permission(SystemPermission.AUTHENTICATION_REGISTRATION_REJECT)`.
+   - Sets status to `INACTIVE`.
+   - Physical SQL `DELETE` is prohibited to uphold the 10-year immutable audit trail requirement mandated by BIR regulations.
+

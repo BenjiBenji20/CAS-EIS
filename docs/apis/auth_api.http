@@ -23,7 +23,7 @@ Content-Type: application/json
 X-Header: {{secret_header_value}}
 
 {
-    "username": "superadmin",
+    "username": "admin_user",
     "plain_password": "Password@123"
 }
 
@@ -57,3 +57,37 @@ X-Header: {{secret_header_value}}
     "username": "superadmin",
     "plain_password": "Password@123"
 }
+
+
+###
+# 5. List Pending Registrations (Admin Only)
+# Guarded by require_permission(SystemPermission.AUTHENTICATION_USER_READ)
+# Uses active access_token cookie from login (#2)
+GET {{host}}/api/private/admin/users/pending
+Content-Type: application/json
+X-Header: {{secret_header_value}}
+
+
+###
+# 6. Approve User Registration (Admin Only)
+# Guarded by require_permission(SystemPermission.AUTHENTICATION_REGISTRATION_ACCEPT)
+# Transitions status from PENDING to ACTIVE and assigns initial role (default: STAFF_USER).
+# Replace :user_id with the pending user's UUID from #5
+POST {{host}}/api/private/admin/users/01a11fcc-e2bc-79e6-903c-2983865dae69/approve
+Content-Type: application/json
+X-Header: {{secret_header_value}}
+
+{
+    "role_name": "STAFF_USER"
+}
+
+
+###
+# 7. Reject User Registration (Admin Only)
+# Guarded by require_permission(SystemPermission.AUTHENTICATION_REGISTRATION_REJECT)
+# Transitions status from PENDING to INACTIVE (soft audit retention under BIR rules).
+# Replace :user_id with the pending user's UUID from #5
+POST {{host}}/api/private/admin/users/01a11fcc-e2bc-79e6-903c-2983865dae69/reject
+Content-Type: application/json
+X-Header: {{secret_header_value}}
+

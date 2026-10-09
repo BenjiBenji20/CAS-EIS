@@ -1,0 +1,49 @@
+# ==============================================================================
+# SESSION LIFECYCLE & ADMINISTRATIVE OVERRIDES (BIR CAS ANNEX B ITEM 11.B)
+# ==============================================================================
+
+###
+# 1. User Logout (Own Session)
+# Gracefully deactivates current session in PostgreSQL & Redis, clears HTTP-Only cookies.
+# Requires active session cookie (access_token)
+POST {{host}}/api/private/session/logout
+Content-Type: application/json
+X-Header: {{secret_header_value}}
+
+
+###
+# 2. Admin List All Active Sessions Across All Users
+# Guarded by require_role(SUPER_ADMIN, ADMIN).
+# Returns enriched session list with user identity (user_id, username, email, roles, full_name).
+GET {{host}}/api/private/admin/sessions
+Content-Type: application/json
+X-Header: {{secret_header_value}}
+
+
+
+###
+# 3. Admin Force Logout Specific Session by UUID
+# Immediately terminates a specific active session, evicting it from Redis & DB.
+# Guarded by require_role(SUPER_ADMIN, ADMIN).
+# Replace :session_id with the target session's UUID
+DELETE {{host}}/api/private/admin/sessions/0192e2b3-7a91-7640-80ea-000000000002
+Content-Type: application/json
+X-Header: {{secret_header_value}}
+
+
+###
+# 4. Admin Mass Logout All Sessions with Step-Up Sudo Re-Authentication
+# Terminate ALL active sessions for a target user across all devices/terminals.
+# Requires admin_password in the body to guard against unauthorized mass eviction.
+# Guarded by require_role(SUPER_ADMIN, ADMIN) and verify_sudo_credential.
+# Replace :user_id with the target user's UUID
+POST {{host}}/api/private/admin/users/0192e2b3-7a91-7640-80ea-000000000001/sessions/terminate-all
+Content-Type: application/json
+X-Header: {{secret_header_value}}
+
+{
+    "admin_username": "superadmin",
+    "admin_password": "Admin@123456"
+}
+
+
