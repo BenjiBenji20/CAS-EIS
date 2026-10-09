@@ -53,13 +53,12 @@ erDiagram
     auth_users ||--o| profile_user_profiles : "has"
 
     auth_users {
-        uuid id PK
+        uuid id PK "Internal UUIDv7 Primary Key"
+        string user_code UK "Human-facing ID (e.g. USR-00001)"
         string username UK
         string email UK
         string password_hash
         enum status "PENDING, ACTIVE, INACTIVE, SUSPENDED"
-        smallint failed_login_attempt_cnt
-        datetime failed_login_attempt_time
         datetime banned_until_time
         datetime created_at
         datetime updated_at

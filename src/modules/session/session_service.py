@@ -144,6 +144,7 @@ class SessionService:
 
             user_info = SessionUserInfo(
                 user_id=s.user_id,
+                user_code=u.user_code if u and getattr(u, "user_code", None) else "UNKNOWN",
                 username=u.username if u else "unknown",
                 email=u.email if u else "unknown",
                 status=user_status,

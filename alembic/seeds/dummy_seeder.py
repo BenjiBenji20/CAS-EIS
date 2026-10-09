@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
+# pyrefly: ignore [missing-import]
 from alembic.seeds.base_seeder import BaseSeeder
 from core.settings import settings
 from modules.authentication.auth_model import Role, User, UserRole, UserStatus
@@ -39,6 +40,7 @@ class DummySeeder(BaseSeeder):
 
         dummy_users = [
             {
+                "user_code": "USR-00004",
                 "username": "pending_user",
                 "email": "pending@system.local",
                 "status": UserStatus.PENDING,
@@ -49,6 +51,7 @@ class DummySeeder(BaseSeeder):
                 "cellphone_number": "+12345678901",
             },
             {
+                "user_code": "USR-00003",
                 "username": "staff_user",
                 "email": "staff@system.local",
                 "status": UserStatus.ACTIVE,
@@ -59,6 +62,7 @@ class DummySeeder(BaseSeeder):
                 "cellphone_number": "+12345678902",
             },
             {
+                "user_code": "USR-00002",
                 "username": "admin_user",
                 "email": "admin_test@system.local",
                 "status": UserStatus.ACTIVE,
@@ -77,6 +81,7 @@ class DummySeeder(BaseSeeder):
 
             if not existing_user:
                 new_user = User(
+                    user_code=u_data["user_code"],
                     username=u_data["username"],
                     email=u_data["email"],
                     password_hash=hashed_pwd,

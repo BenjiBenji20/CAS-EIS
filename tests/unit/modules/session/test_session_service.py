@@ -220,6 +220,7 @@ async def test_get_all_active_sessions_with_joined_user_and_profile():
     profile_mock = MagicMock(first_name="John", last_name="Doe")
     user_mock_1 = MagicMock(
         id=user_id_1,
+        user_code="USR-00001",
         username="johndoe",
         email="johndoe@example.com",
         status=MagicMock(value="ACTIVE"),
@@ -241,6 +242,7 @@ async def test_get_all_active_sessions_with_joined_user_and_profile():
     # User 2 without profile (profile is None) and no roles
     user_mock_2 = MagicMock(
         id=user_id_2,
+        user_code="USR-00002",
         username="janedoe",
         email="janedoe@example.com",
         status=MagicMock(value="ACTIVE"),
@@ -274,6 +276,7 @@ async def test_get_all_active_sessions_with_joined_user_and_profile():
     # Verify User 1
     assert result[0].id == session_1.id
     assert result[0].user.user_id == user_id_1
+    assert result[0].user.user_code == "USR-00001"
     assert result[0].user.username == "johndoe"
     assert result[0].user.email == "johndoe@example.com"
     assert result[0].user.full_name == "John Doe"
@@ -283,6 +286,7 @@ async def test_get_all_active_sessions_with_joined_user_and_profile():
     # Verify User 2 (Graceful fallback for incomplete profile)
     assert result[1].id == session_2.id
     assert result[1].user.user_id == user_id_2
+    assert result[1].user.user_code == "USR-00002"
     assert result[1].user.username == "janedoe"
     assert result[1].user.full_name is None
     assert result[1].user.roles == []

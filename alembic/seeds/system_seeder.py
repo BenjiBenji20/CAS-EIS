@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
+# pyrefly: ignore [missing-import]
 from alembic.seeds.base_seeder import BaseSeeder
 from core.settings import settings
 from modules.authentication.auth_model import Permission, Role, RolePermission, User, UserRole, UserStatus
@@ -143,6 +144,7 @@ class SystemSeeder(BaseSeeder):
         if not existing_sa:
             hashed_pwd = self.pwd_context.hash(sa_password)
             sa_user = User(
+                user_code="USR-00001",
                 username=sa_username,
                 email=sa_email,
                 password_hash=hashed_pwd,

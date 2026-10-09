@@ -73,6 +73,7 @@ def test_user_registration_response_serialization():
     """Test UserRegistrationResponse serialization and camelCase output."""
     res = UserRegistrationResponse(
         id="123e4567-e89b-12d3-a456-426614174000",
+        user_code="USR-00042",
         username="john_doe",
         email="john@example.com",
         status="PENDING",
@@ -84,6 +85,7 @@ def test_user_registration_response_serialization():
     )
     data = res.model_dump(by_alias=True)
     assert data["id"] == "123e4567-e89b-12d3-a456-426614174000"
+    assert data["userCode"] == "USR-00042"
     assert data["status"] == "PENDING"
     assert "responseDetails" in data
     assert data["responseDetails"]["status"] is True

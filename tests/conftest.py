@@ -49,7 +49,24 @@ async def prepare_test_database():
         await conn.execute(sa.text("CREATE SCHEMA IF NOT EXISTS profile"))
         await conn.execute(sa.text("CREATE SCHEMA IF NOT EXISTS session"))
         await conn.execute(sa.text("CREATE SCHEMA IF NOT EXISTS eis"))
+        await conn.execute(sa.text("CREATE SEQUENCE IF NOT EXISTS auth.user_code_seq START WITH 1 INCREMENT BY 1"))
         await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(sa.text("""
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.tables 
+                    WHERE table_schema = 'auth' AND table_name = 'users'
+                ) AND NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'user_code'
+                ) THEN
+                    ALTER TABLE auth.users ADD COLUMN user_code VARCHAR(20) 
+                    DEFAULT ('USR-' || lpad(nextval('auth.user_code_seq')::text, 5, '0')) NOT NULL;
+                    CREATE UNIQUE INDEX IF NOT EXISTS ix_auth_users_user_code ON auth.users (user_code);
+                END IF;
+            END $$;
+        """))
     yield
     await engine.dispose()
 

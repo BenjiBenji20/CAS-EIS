@@ -3,7 +3,7 @@ from uuid import UUID
 
 from db.db_session import get_async_db
 from fastapi import Depends
-from sqlalchemy import exists, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 
@@ -35,6 +35,20 @@ class AuthenticationRepository(BaseRepository[User]):
             logger.error(f"Error occurred while searching for username {username}: {e}")
             raise InternalServerException(
                 message="Error occurred while searching for username.",
+                error_code="USER_VALIDATION_FAILED"
+            )
+
+
+    async def get_user_by_user_code(self, user_code: str) -> Optional[User]:
+        """Search user by human-facing user_code (case-insensitive). Limit 1."""
+        try:
+            query = select(User).where(func.upper(User.user_code) == user_code.upper().strip()).limit(1)
+            result = await self.db.execute(query)
+            return result.scalars().first()
+        except Exception as e:
+            logger.error(f"Error occurred while searching for user_code {user_code}: {e}")
+            raise InternalServerException(
+                message="Error occurred while searching for user code.",
                 error_code="USER_VALIDATION_FAILED"
             )
 

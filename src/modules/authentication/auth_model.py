@@ -8,7 +8,9 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Sequence,
     String,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -115,6 +117,9 @@ class UserRole(Base, TimestampMixin):
     )
 
 
+user_code_seq = Sequence("user_code_seq", schema="auth", metadata=Base.metadata)
+
+
 class User(Base, TimestampMixin):
     """Core identity and authentication record."""
 
@@ -122,6 +127,14 @@ class User(Base, TimestampMixin):
     __table_args__ = {"schema": "auth"}
 
     id: Mapped[uuid_pk]
+    user_code: Mapped[str] = mapped_column(
+        String(20),
+        user_code_seq,
+        unique=True,
+        index=True,
+        nullable=False,
+        server_default=text("'USR-' || lpad(nextval('auth.user_code_seq')::text, 5, '0')"),
+    )
     username: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)
     email: Mapped[str] = mapped_column(String(100), unique=True, index=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)

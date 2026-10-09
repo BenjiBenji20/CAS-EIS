@@ -6,6 +6,7 @@ from base.schema import BaseSchema
 
 class UserProfileResponse(BaseSchema):
     user_id: UUID
+    user_code: str | None = None
     first_name: str | None = None
     middle_name: str | None = None
     last_name: str | None = None

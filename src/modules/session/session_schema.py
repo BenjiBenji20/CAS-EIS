@@ -16,6 +16,7 @@ class SessionLogoutResponse(BaseSchema):
 class SessionUserInfo(BaseSchema):
     """Identity and role metadata of the session owner."""
     user_id: UUID
+    user_code: str = Field(description="Human-friendly user code (e.g. USR-00001)")
     username: str
     email: str
     status: str

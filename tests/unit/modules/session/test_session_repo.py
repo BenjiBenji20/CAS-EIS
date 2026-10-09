@@ -17,7 +17,7 @@ async def test_deactivate_token_success():
     result = await repo.deactivate_token("sample_token_hash_123")
 
     mock_db.execute.assert_awaited_once()
-    mock_db.flush.assert_awaited_once()
+    mock_db.commit.assert_awaited_once()
     assert result == mock_session_instance
 
 
@@ -98,5 +98,5 @@ async def test_deactivate_session_by_id_success():
     result = await repo.deactivate_session_by_id(session_id)
 
     mock_db.execute.assert_awaited_once()
-    mock_db.flush.assert_awaited_once()
+    mock_db.commit.assert_awaited_once()
     assert result == mock_session

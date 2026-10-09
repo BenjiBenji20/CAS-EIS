@@ -38,6 +38,7 @@ async def test_register_user_success():
 
     mock_created_user = MagicMock()
     mock_created_user.id = "987e6543-e89b-12d3-a456-426614174000"
+    mock_created_user.user_code = "USR-00001"
     mock_created_user.username = "testuser"
     mock_created_user.email = "test@example.com"
     mock_created_user.status = "PENDING"
@@ -214,6 +215,7 @@ async def test_authenticate_user_expired_ban_recovers_account():
     mock_auth_repo = AsyncMock()
     user = MagicMock(spec=User)
     user.id = uuid.uuid4()
+    user.user_code = "USR-00001"
     user.username = "recovered_user"
     user.email = "recovered@example.com"
     user.status = UserStatus.SUSPENDED
@@ -379,6 +381,7 @@ async def test_authenticate_user_concurrent_session_blocked():
     mock_auth_repo = AsyncMock()
     user = MagicMock(spec=User)
     user.id = uuid.uuid4()
+    user.user_code = "USR-00001"
     user.username = "concurrent_user"
     user.email = "concurrent@example.com"
     user.status = UserStatus.ACTIVE
@@ -388,8 +391,8 @@ async def test_authenticate_user_concurrent_session_blocked():
 
     active_session = MagicMock()
     active_session.id = uuid.uuid4()
-    # Recently active (only 5 minutes ago)
-    active_session.last_active_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+    # Recently active (well within idle window)
+    active_session.last_active_at = datetime.now(timezone.utc) - timedelta(seconds=min(settings.SESSION_IDLE_TIMEOUT_SEC // 2, 10))
     active_session.is_active = True
 
     mock_session_repo = AsyncMock()
@@ -423,6 +426,7 @@ async def test_authenticate_user_idle_session_retired_and_allows_login():
     mock_auth_repo = AsyncMock()
     user = MagicMock(spec=User)
     user.id = uuid.uuid4()
+    user.user_code = "USR-00001"
     user.username = "idle_user"
     user.email = "idle@example.com"
     user.status = UserStatus.ACTIVE
@@ -466,8 +470,8 @@ async def test_authenticate_user_idle_session_retired_and_allows_login():
 async def test_get_pending_registrations():
     """Test retrieving list of users in PENDING status."""
     mock_auth_repo = AsyncMock()
-    user1 = MagicMock(id=uuid.uuid4(), username="user1", email="user1@example.com", status=UserStatus.PENDING, created_at=datetime.now(timezone.utc))
-    user2 = MagicMock(id=uuid.uuid4(), username="user2", email="user2@example.com", status=UserStatus.PENDING, created_at=datetime.now(timezone.utc))
+    user1 = MagicMock(id=uuid.uuid4(), user_code="USR-00001", username="user1", email="user1@example.com", status=UserStatus.PENDING, created_at=datetime.now(timezone.utc))
+    user2 = MagicMock(id=uuid.uuid4(), user_code="USR-00002", username="user2", email="user2@example.com", status=UserStatus.PENDING, created_at=datetime.now(timezone.utc))
     mock_auth_repo.get_pending_users.return_value = [user1, user2]
 
     service = AuthenticationService(
@@ -489,7 +493,7 @@ async def test_get_pending_registrations():
 async def test_approve_user_registration_success():
     """Test successfully approving a pending user and assigning role."""
     mock_auth_repo = AsyncMock()
-    user = MagicMock(id=uuid.uuid4(), username="pending_user", status=UserStatus.PENDING)
+    user = MagicMock(id=uuid.uuid4(), user_code="USR-00001", username="pending_user", status=UserStatus.PENDING)
     mock_auth_repo.get_by_id.return_value = user
 
     service = AuthenticationService(
@@ -549,7 +553,7 @@ async def test_approve_user_registration_already_active():
 async def test_reject_user_registration_success():
     """Test rejecting a pending user marks them INACTIVE."""
     mock_auth_repo = AsyncMock()
-    user = MagicMock(id=uuid.uuid4(), username="rejected_user", status=UserStatus.PENDING)
+    user = MagicMock(id=uuid.uuid4(), user_code="USR-00001", username="rejected_user", status=UserStatus.PENDING)
     mock_auth_repo.get_by_id.return_value = user
 
     service = AuthenticationService(

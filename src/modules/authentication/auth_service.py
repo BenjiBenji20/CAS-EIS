@@ -95,6 +95,7 @@ class AuthenticationService:
 
             return UserRegistrationResponse(
                 id=str(new_user.id),
+                user_code=new_user.user_code,
                 username=new_user.username,
                 email=new_user.email,
                 status=str(new_user.status.value) if hasattr(new_user.status, "value") else str(new_user.status),
@@ -131,6 +132,7 @@ class AuthenticationService:
         return [
             PendingUserResponse(
                 id=u.id,
+                user_code=u.user_code,
                 username=u.username,
                 email=u.email,
                 status=str(u.status.value) if hasattr(u.status, "value") else str(u.status),
@@ -162,6 +164,7 @@ class AuthenticationService:
             status=True,
             description=f"User {user.username} approved successfully and status set to ACTIVE.",
             user_id=user.id,
+            user_code=user.user_code,
             user_status="ACTIVE",
         )
 
@@ -184,6 +187,7 @@ class AuthenticationService:
             status=True,
             description=f"User {user.username} registration rejected and status set to INACTIVE.",
             user_id=user.id,
+            user_code=user.user_code,
             user_status="INACTIVE",
         )
 
@@ -382,6 +386,7 @@ class AuthenticationService:
             return UserAuthenticationResponse(
                 session_id=str(new_session.id),
                 user_id=str(user_id),
+                user_code=user.user_code,
                 username=username,
                 email=user.email,
                 status=str(user.status.value) if hasattr(user.status, "value") else str(user.status),

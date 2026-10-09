@@ -54,7 +54,7 @@ Content-Type: application/json
 X-Header: {{secret_header_value}}
 
 {
-    "username": "superadmin",
+    "username": "admin_user",
     "plain_password": "Password@123"
 }
 

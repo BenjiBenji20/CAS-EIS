@@ -34,6 +34,7 @@ class RefreshAuthenticationTokensResponse(BaseSchema):
 class UserAuthenticationResponse(BaseSchema):
     session_id: str | None = None
     user_id: str | None = None
+    user_code: str | None = None
     username: str | None = None
     email: str | None = None
     status: str | None = None
@@ -79,6 +80,7 @@ class UserRegistrationRequest(UserAuthenticationRequest):
 
 class UserRegistrationResponse(BaseSchema):
     id: str | None = None
+    user_code: str | None = None
     username: str | None = None
     email: str | None = None
     status: str | None = "PENDING"
@@ -88,6 +90,7 @@ class UserRegistrationResponse(BaseSchema):
 class PendingUserResponse(BaseSchema):
     """Details of a registered user awaiting administrative vetting/approval."""
     id: UUID
+    user_code: str
     username: str
     email: str
     status: str
@@ -104,4 +107,5 @@ class UserApprovalActionResponse(BaseSchema):
     status: bool = True
     description: str
     user_id: UUID
+    user_code: str | None = None
     user_status: str

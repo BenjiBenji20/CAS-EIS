@@ -14,7 +14,7 @@ X-Header: {{secret_header_value}}
 ###
 # 2. Admin List All Active Sessions Across All Users
 # Guarded by require_role(SUPER_ADMIN, ADMIN).
-# Returns enriched session list with user identity (user_id, username, email, roles, full_name).
+# Returns enriched session list with user identity (user_id, user_code, username, email, roles, full_name).
 GET {{host}}/api/private/admin/sessions
 Content-Type: application/json
 X-Header: {{secret_header_value}}
