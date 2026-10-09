@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Optional
+from typing import List, Optional
 from uuid import UUID
 
 from db.db_session import get_async_db
@@ -8,8 +8,10 @@ from fastapi import Depends
 from loguru import logger
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload, selectinload
 
 from base.repository import BaseRepository
+from modules.authentication.auth_model import User
 from modules.session.session_model import UserSession
 
 
@@ -104,4 +106,58 @@ class UserSessionRepository(BaseRepository[UserSession]):
                 message="Failed to update session status",
                 error_code="SESSION_UPDATE_FAILED",
             )
+
+    async def deactivate_all_active_by_user_id(
+        self, user_id: UUID
+    ) -> int:
+        """Deactivate all active sessions for a given user UUID. Returns count of deactivated records."""
+        try:
+            stmt = (
+                update(UserSession)
+                .where(
+                    UserSession.user_id == user_id,
+                    UserSession.is_active.is_(True),
+                )
+                .values(is_active=False)
+                .returning(UserSession.id)
+            )
+            result = await self.db.execute(stmt)
+            await self.db.flush()
+            deactivated_ids = result.scalars().all()
+            return len(deactivated_ids)
+        except Exception as e:
+            logger.error(f"Error deactivating all active sessions for user {user_id}: {e}")
+            raise InternalServerException(
+                message="Failed to terminate user sessions",
+                error_code="SESSION_UPDATE_FAILED",
+            )
+
+
+    async def get_all_active_sessions_with_user_info(
+        self,
+    ) -> List[UserSession]:
+        """Fetch all active sessions across all users, joined with user identity, roles, and profile."""
+        try:
+            stmt = (
+                select(UserSession)
+                .join(UserSession.user)
+                .options(
+                    joinedload(UserSession.user).joinedload(User.profile),
+                    selectinload(UserSession.user).selectinload(User.roles),
+                )
+                .where(
+                    UserSession.is_active.is_(True),
+                    UserSession.expires_at > datetime.now(timezone.utc),
+                )
+                .order_by(UserSession.last_active_at.desc())
+            )
+            result = await self.db.execute(stmt)
+            return list(result.scalars().unique().all())
+        except Exception as e:
+            logger.error(f"Error querying all active sessions with user info: {e}")
+            raise InternalServerException(
+                message="Failed to query active sessions",
+                error_code="SESSION_QUERY_FAILED",
+            )
+
             

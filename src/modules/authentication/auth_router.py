@@ -1,12 +1,24 @@
+from typing import List, Optional
+from uuid import UUID
+
 from core.settings import settings
 from dependencies.rate_limit import rate_limit_by_ip
+from dependencies.rbac_guard import require_role
 from fastapi import APIRouter, Depends, Request, Response, status
-
-from modules.authentication.auth_schema import RefreshAuthenticationTokensResponse, UserRegistrationRequest, UserRegistrationResponse
 from loguru import logger
+from shares.enums import RoleName
 
+from modules.authentication.auth_schema import (
+    ApproveUserRequest,
+    PendingUserResponse,
+    RefreshAuthenticationTokensResponse,
+    UserApprovalActionResponse,
+    UserAuthenticationRequest,
+    UserAuthenticationResponse,
+    UserRegistrationRequest,
+    UserRegistrationResponse,
+)
 from modules.authentication.auth_service import AuthenticationService
-from modules.authentication.auth_schema import UserAuthenticationResponse, UserAuthenticationRequest
 
 
 router = APIRouter(
@@ -132,3 +144,54 @@ async def refresh_tokens(
             
     return new_access_token
 
+
+# ======================================================================
+# ADMINISTRATIVE USER APPROVAL ENDPOINTS (BIR ANNEX B ITEM 11.A)
+# ======================================================================
+@router.get(
+    "/api/private/admin/users/pending",
+    tags=["Administrative User Approvals"],
+    summary="List all user registrations pending administrator approval.",
+    status_code=status.HTTP_200_OK,
+    response_model=List[PendingUserResponse],
+    dependencies=[Depends(require_role(RoleName.SUPER_ADMIN, RoleName.ADMIN))],
+)
+async def list_pending_user_registrations(
+    service: AuthenticationService = Depends(),
+):
+    """Retrieve all user accounts in PENDING status awaiting vetting."""
+    return await service.get_pending_registrations()
+
+
+@router.post(
+    "/api/private/admin/users/{user_id}/approve",
+    tags=["Administrative User Approvals"],
+    summary="Approve pending user registration and transition status to ACTIVE.",
+    status_code=status.HTTP_200_OK,
+    response_model=UserApprovalActionResponse,
+    dependencies=[Depends(require_role(RoleName.SUPER_ADMIN, RoleName.ADMIN))],
+)
+async def approve_user_registration(
+    user_id: UUID,
+    payload: Optional[ApproveUserRequest] = None,
+    service: AuthenticationService = Depends(),
+):
+    """Approve a PENDING user, assigning an initial role (default: STAFF_USER) and marking account ACTIVE."""
+    role_name = payload.role_name if payload and payload.role_name else "STAFF_USER"
+    return await service.approve_user_registration(user_id=user_id, role_name=role_name)
+
+
+@router.post(
+    "/api/private/admin/users/{user_id}/reject",
+    tags=["Administrative User Approvals"],
+    summary="Reject pending user registration and transition status to INACTIVE.",
+    status_code=status.HTTP_200_OK,
+    response_model=UserApprovalActionResponse,
+    dependencies=[Depends(require_role(RoleName.SUPER_ADMIN, RoleName.ADMIN))],
+)
+async def reject_user_registration(
+    user_id: UUID,
+    service: AuthenticationService = Depends(),
+):
+    """Reject a PENDING user registration, marking the record INACTIVE for audit trail retention."""
+    return await service.reject_user_registration(user_id=user_id)

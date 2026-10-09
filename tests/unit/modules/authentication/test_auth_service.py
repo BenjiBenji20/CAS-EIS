@@ -7,7 +7,7 @@ import jwt
 import pytest
 
 from core.settings import settings
-from exceptions.app_exception import ConflictException, ForbiddenException, UnauthorizedException
+from exceptions.app_exception import BadRequestException, ConflictException, ForbiddenException, NotFoundException, UnauthorizedException
 from modules.authentication.auth_model import User, UserStatus
 from modules.authentication.auth_schema import UserAuthenticationRequest, UserRegistrationRequest
 from modules.authentication.auth_service import AuthenticationService
@@ -460,3 +460,137 @@ async def test_authenticate_user_idle_session_retired_and_allows_login():
     assert response is not None
     # Stale session must be deactivated
     mock_session_repo.deactivate_session_by_id.assert_awaited_once_with(stale_session.id)
+
+
+@pytest.mark.asyncio
+async def test_get_pending_registrations():
+    """Test retrieving list of users in PENDING status."""
+    mock_auth_repo = AsyncMock()
+    user1 = MagicMock(id=uuid.uuid4(), username="user1", email="user1@example.com", status=UserStatus.PENDING, created_at=datetime.now(timezone.utc))
+    user2 = MagicMock(id=uuid.uuid4(), username="user2", email="user2@example.com", status=UserStatus.PENDING, created_at=datetime.now(timezone.utc))
+    mock_auth_repo.get_pending_users.return_value = [user1, user2]
+
+    service = AuthenticationService(
+        auth_repo=mock_auth_repo,
+        user_profile_repo=AsyncMock(),
+        user_session_repo=AsyncMock(),
+        async_cache=AsyncMock(),
+        cache_utils=AsyncMock(),
+    )
+
+    result = await service.get_pending_registrations()
+    assert len(result) == 2
+    assert result[0].username == "user1"
+    assert result[1].username == "user2"
+    mock_auth_repo.get_pending_users.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_approve_user_registration_success():
+    """Test successfully approving a pending user and assigning role."""
+    mock_auth_repo = AsyncMock()
+    user = MagicMock(id=uuid.uuid4(), username="pending_user", status=UserStatus.PENDING)
+    mock_auth_repo.get_by_id.return_value = user
+
+    service = AuthenticationService(
+        auth_repo=mock_auth_repo,
+        user_profile_repo=AsyncMock(),
+        user_session_repo=AsyncMock(),
+        async_cache=AsyncMock(),
+        cache_utils=AsyncMock(),
+    )
+
+    res = await service.approve_user_registration(user.id, role_name="STAFF_USER")
+    assert res.status is True
+    assert res.user_status == "ACTIVE"
+    assert user.status == UserStatus.ACTIVE
+    mock_auth_repo.assign_role_to_user.assert_awaited_once_with(user_id=user.id, role_name="STAFF_USER")
+    mock_auth_repo.db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_approve_user_registration_not_found():
+    """Test approving a non-existent user raises NotFoundException."""
+    mock_auth_repo = AsyncMock()
+    mock_auth_repo.get_by_id.return_value = None
+
+    service = AuthenticationService(
+        auth_repo=mock_auth_repo,
+        user_profile_repo=AsyncMock(),
+        user_session_repo=AsyncMock(),
+        async_cache=AsyncMock(),
+        cache_utils=AsyncMock(),
+    )
+
+    with pytest.raises(NotFoundException):
+        await service.approve_user_registration(uuid.uuid4())
+
+
+@pytest.mark.asyncio
+async def test_approve_user_registration_already_active():
+    """Test approving an already active user raises BadRequestException."""
+    mock_auth_repo = AsyncMock()
+    user = MagicMock(id=uuid.uuid4(), username="active_user", status=UserStatus.ACTIVE)
+    mock_auth_repo.get_by_id.return_value = user
+
+    service = AuthenticationService(
+        auth_repo=mock_auth_repo,
+        user_profile_repo=AsyncMock(),
+        user_session_repo=AsyncMock(),
+        async_cache=AsyncMock(),
+        cache_utils=AsyncMock(),
+    )
+
+    with pytest.raises(BadRequestException):
+        await service.approve_user_registration(user.id)
+
+
+@pytest.mark.asyncio
+async def test_reject_user_registration_success():
+    """Test rejecting a pending user marks them INACTIVE."""
+    mock_auth_repo = AsyncMock()
+    user = MagicMock(id=uuid.uuid4(), username="rejected_user", status=UserStatus.PENDING)
+    mock_auth_repo.get_by_id.return_value = user
+
+    service = AuthenticationService(
+        auth_repo=mock_auth_repo,
+        user_profile_repo=AsyncMock(),
+        user_session_repo=AsyncMock(),
+        async_cache=AsyncMock(),
+        cache_utils=AsyncMock(),
+    )
+
+    res = await service.reject_user_registration(user.id)
+    assert res.status is True
+    assert res.user_status == "INACTIVE"
+    assert user.status == UserStatus.INACTIVE
+    mock_auth_repo.db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_verify_admin_user_credential():
+    """Test password verification by user ID and username."""
+    mock_auth_repo = AsyncMock()
+    user = MagicMock(
+        id=uuid.uuid4(),
+        username="admin",
+        password_hash=AuthenticationService.pwd_context.hash("CorrectPassword123!"),
+    )
+    mock_auth_repo.get_by_id.return_value = user
+
+    service = AuthenticationService(
+        auth_repo=mock_auth_repo,
+        user_profile_repo=AsyncMock(),
+        user_session_repo=AsyncMock(),
+        async_cache=AsyncMock(),
+        cache_utils=AsyncMock(),
+    )
+
+    assert await service.verify_admin_user_credential(user.id, "admin", "CorrectPassword123!") is True
+    assert await service.verify_admin_user_credential(user.id, "wrong_user", "CorrectPassword123!") is False
+    assert await service.verify_admin_user_credential(user.id, "admin", "WrongPassword") is False
+
+    mock_auth_repo.get_by_id.return_value = None
+    assert await service.verify_admin_user_credential(uuid.uuid4(), "admin", "CorrectPassword123!") is False
+
+

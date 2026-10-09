@@ -21,8 +21,26 @@ from modules.session.session_model import UserSession
 import redis.asyncio as aioredis
 import asyncio
 
-from modules.authentication.auth_schema import AuthenticationTokenPayload, RefreshAuthenticationTokensResponse, UserAuthenticationRequest, UserAuthenticationResponse, UserRegistrationRequest, UserRegistrationResponse
-from exceptions.app_exception import AppException, ConflictException, InternalServerException, UnauthorizedException,  ForbiddenException
+from modules.authentication.auth_schema import (
+    AuthenticationTokenPayload,
+    RefreshAuthenticationTokensResponse,
+    UserAuthenticationRequest,
+    UserAuthenticationResponse,
+    UserRegistrationRequest,
+    UserRegistrationResponse,
+    PendingUserResponse,
+    ApproveUserRequest,
+    UserApprovalActionResponse,
+)
+from exceptions.app_exception import (
+    AppException,
+    BadRequestException,
+    ConflictException,
+    InternalServerException,
+    NotFoundException,
+    UnauthorizedException,
+    ForbiddenException,
+)
 from modules.authentication.auth_repository import AuthenticationRepository
 from modules.profile.user_profile_schema import UserProfileResponse
 from utils.maintain_cache_key import MaintainCacheKeyUtils
@@ -102,6 +120,72 @@ class AuthenticationService:
                 message="Failed to complete user registration",
                 error_code="REGISTRATION_FAILED"
             )
+
+
+    # ======================================================================
+    # ADMIN USER APPROVAL WORKFLOW (BIR ANNEX B ITEM 11.A)
+    # ======================================================================
+    async def get_pending_registrations(self) -> list[PendingUserResponse]:
+        """Fetch all registrations currently awaiting administrator approval."""
+        users = await self._auth_repo.get_pending_users()
+        return [
+            PendingUserResponse(
+                id=u.id,
+                username=u.username,
+                email=u.email,
+                status=str(u.status.value) if hasattr(u.status, "value") else str(u.status),
+                created_at=u.created_at,
+            )
+            for u in users
+        ]
+
+    async def approve_user_registration(
+        self, user_id: UUID, role_name: str | None = "STAFF_USER"
+    ) -> UserApprovalActionResponse:
+        """Approves a PENDING user registration and transitions status to ACTIVE with assigned role."""
+        user = await self._auth_repo.get_by_id(user_id)
+        if not user:
+            logger.warning(f"User {user_id} not found for approval.")
+            raise NotFoundException(message="User not found.")
+
+        if user.status != UserStatus.PENDING:
+            logger.warning(f"User {user_id} is in status {user.status}, cannot approve.")
+            raise BadRequestException(message=f"User is already in {user.status} status.")
+
+        user.status = UserStatus.ACTIVE
+        if role_name:
+            await self._auth_repo.assign_role_to_user(user_id=user.id, role_name=role_name)
+        await self._auth_repo.db.commit()
+
+        logger.info(f"User {user.username} ({user_id}) approved and activated with role {role_name}.")
+        return UserApprovalActionResponse(
+            status=True,
+            description=f"User {user.username} approved successfully and status set to ACTIVE.",
+            user_id=user.id,
+            user_status="ACTIVE",
+        )
+
+    async def reject_user_registration(self, user_id: UUID) -> UserApprovalActionResponse:
+        """Rejects a PENDING user registration and transitions status to INACTIVE."""
+        user = await self._auth_repo.get_by_id(user_id)
+        if not user:
+            logger.warning(f"User {user_id} not found for rejection.")
+            raise NotFoundException(message="User not found.")
+
+        if user.status != UserStatus.PENDING:
+            logger.warning(f"User {user_id} is in status {user.status}, cannot reject.")
+            raise BadRequestException(message=f"User is already in {user.status} status.")
+
+        user.status = UserStatus.INACTIVE
+        await self._auth_repo.db.commit()
+
+        logger.info(f"User {user.username} ({user_id}) registration rejected and set to INACTIVE.")
+        return UserApprovalActionResponse(
+            status=True,
+            description=f"User {user.username} registration rejected and status set to INACTIVE.",
+            user_id=user.id,
+            user_status="INACTIVE",
+        )
 
 
     # ======================================================================
@@ -639,6 +723,21 @@ class AuthenticationService:
     def _verify_password(self, plain_password: str, hashed_password: str) -> bool:
         """Verify plain text password against hash using pwdlib."""
         return self.pwd_context.verify(plain_password, hashed_password)
+
+
+    async def verify_admin_user_credential(self, user_id: UUID, username: str, plain_password: str) -> bool:
+        """Verifies that the provided plain password matches the user's password hash in DB."""
+        user = await self._auth_repo.get_by_id(user_id)
+        if not user or not user.password_hash:
+            logger.error(f"User {user_id} not found or no password hash.")
+            return False
+
+        if username != user.username:
+            logger.warning(f"Invalid username for user {user_id}. Username: {username}, Expected: {user.username}")
+            return False
+        
+        return await asyncio.to_thread(self._verify_password, plain_password, user.password_hash)
+
 
     async def _session_cache_life_cycle(
         self, key: str, name: str, 

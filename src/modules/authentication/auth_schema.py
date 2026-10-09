@@ -1,3 +1,5 @@
+from datetime import datetime
+from uuid import UUID
 import re
 from modules.profile.user_profile_schema import UserProfileResponse
 from pydantic import BaseModel, EmailStr, Field, field_validator
@@ -81,3 +83,25 @@ class UserRegistrationResponse(BaseSchema):
     email: str | None = None
     status: str | None = "PENDING"
     response_details: SchemaResponseDetails
+
+
+class PendingUserResponse(BaseSchema):
+    """Details of a registered user awaiting administrative vetting/approval."""
+    id: UUID
+    username: str
+    email: str
+    status: str
+    created_at: datetime
+
+
+class ApproveUserRequest(BaseSchema):
+    """Optional payload when approving a pending user to assign an initial role."""
+    role_name: str | None = Field(default="STAFF_USER", description="Initial role to assign (default: STAFF_USER)")
+
+
+class UserApprovalActionResponse(BaseSchema):
+    """Response confirming administrative action on user account."""
+    status: bool = True
+    description: str
+    user_id: UUID
+    user_status: str
