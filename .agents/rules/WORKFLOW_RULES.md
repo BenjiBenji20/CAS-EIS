@@ -21,3 +21,7 @@ trigger: always_on
 ### 3. EXPLICIT HUMAN APPROVAL GATE
 - **Strict Halt:** After generating or updating an implementation plan artifact, halt execution immediately.
 - **No Unsolicited Next Steps:** Do not begin coding based on assumptions. Prompt the user directly and wait for unambiguous, explicit confirmation (e.g., "Plan approved", "Proceed") before writing any implementation code.
+
+### 4. MAINTAINING CODE CLEANLINESS
+- **Delete the dead code:** During refactor, implementation or fix, if the blocks of code, function or class was not necessary to the system, report your action if going to delete it.
+- **Refactor instead of creating a new:** If we are refactoring a code, refactor it. Do NOT create a new and dead code.
