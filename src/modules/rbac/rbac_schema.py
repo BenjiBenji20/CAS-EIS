@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
 from pydantic import Field
@@ -34,9 +35,10 @@ class ModuleSchema(BaseSchema):
 
 
 class RoleOverviewSchema(BaseSchema):
-    """Schema for system role with description and active permission codes."""
+    """Schema for system role with description, rank, and active permission codes."""
     id: UUID = Field(..., description="Database UUID of the role")
     name: str = Field(..., description="Role name (e.g. ADMIN, STAFF_USER)")
+    rank: int = Field(0, description="Numeric hierarchical rank of the role")
     description: Optional[str] = Field(None, description="Human-readable role description")
     is_system_role: bool = Field(False, description="Whether this is an immutable system role")
     permissions: List[str] = Field(default_factory=list, description="Assigned canonical permission codes")
@@ -52,12 +54,15 @@ class RBACConfigResponse(BaseSchema):
 
 
 class UserRBACSummaryResponse(BaseSchema):
-    """Summary of a user's roles and effective permissions."""
+    """Summary of a user's roles, direct custom overrides, and effective permissions."""
     user_id: UUID
     user_code: Optional[str] = None
     username: Optional[str] = None
+    highest_rank: int = Field(0, description="Highest numeric rank among assigned roles")
     roles: List[str] = Field(default_factory=list)
-    permissions: List[str] = Field(default_factory=list)
+    direct_grants: List[str] = Field(default_factory=list, description="Custom direct permission grants")
+    direct_revocations: List[str] = Field(default_factory=list, description="Custom direct permission denials")
+    permissions: List[str] = Field(default_factory=list, description="Effective permission set")
 
 
 class AssignUserRolesPayload(BaseSchema):
@@ -67,6 +72,12 @@ class AssignUserRolesPayload(BaseSchema):
         min_length=1,
         description="List of role names (e.g. 'ADMIN') or role UUIDs to assign",
     )
+    reason: str = Field(
+        ...,
+        min_length=5,
+        max_length=255,
+        description="Mandatory justification reason for audit trail",
+    )
 
 
 class AssignRolePermissionsPayload(BaseSchema):
@@ -74,6 +85,12 @@ class AssignRolePermissionsPayload(BaseSchema):
     permissions: List[str] = Field(
         default_factory=list,
         description="List of canonical permission codes (e.g. 'AUTHENTICATION:USER:READ') or UUIDs",
+    )
+    reason: str = Field(
+        ...,
+        min_length=5,
+        max_length=255,
+        description="Mandatory justification reason for audit trail",
     )
 
 
@@ -86,6 +103,34 @@ class RoleAssignmentItem(BaseSchema):
 class BatchRolePermissionAssignmentPayload(BaseSchema):
     """Request payload for batch updating permissions across multiple roles."""
     assignments: List[RoleAssignmentItem] = Field(..., min_length=1, description="List of role permission assignments")
+    reason: str = Field(
+        ...,
+        min_length=5,
+        max_length=255,
+        description="Mandatory justification reason for audit trail",
+    )
+
+
+class AssignUserDirectPermissionsPayload(BaseSchema):
+    """Request payload for granting or denying direct custom permissions per user."""
+    permissions: List[str] = Field(..., min_length=1, description="List of permission codes or UUIDs")
+    is_granted: bool = Field(True, description="True for explicit grant, False for explicit denial")
+    reason: str = Field(..., min_length=5, max_length=255, description="Mandatory justification reason for audit trail")
+
+
+class RemoveUserDirectPermissionsPayload(BaseSchema):
+    """Request payload for removing direct custom permission overrides from a user."""
+    permissions: List[str] = Field(..., min_length=1, description="List of permission codes or UUIDs to remove")
+    reason: str = Field(..., min_length=5, max_length=255, description="Mandatory justification reason for audit trail")
+
+
+class UserDirectPermissionsResponse(BaseSchema):
+    """Response returned upon updating user direct permission overrides."""
+    status: bool = True
+    message: str
+    user_id: UUID
+    direct_grants: List[str] = Field(default_factory=list)
+    direct_revocations: List[str] = Field(default_factory=list)
 
 
 class UserRoleAssignmentResponse(BaseSchema):
@@ -94,6 +139,8 @@ class UserRoleAssignmentResponse(BaseSchema):
     message: str
     user_id: UUID
     assigned_roles: List[str] = Field(default_factory=list)
+    requires_approval: bool = Field(False, description="True if change was queued as pending approval")
+    request_id: Optional[UUID] = Field(None, description="Change request UUID if queued for approval")
 
 
 class RolePermissionAssignmentResponse(BaseSchema):
@@ -103,6 +150,8 @@ class RolePermissionAssignmentResponse(BaseSchema):
     role_id: UUID
     role_name: str
     assigned_permissions: List[str] = Field(default_factory=list)
+    requires_approval: bool = Field(False, description="True if change was queued as pending approval")
+    request_id: Optional[UUID] = Field(None, description="Change request UUID if queued for approval")
 
 
 class BatchRolePermissionAssignmentResponse(BaseSchema):
@@ -110,3 +159,24 @@ class BatchRolePermissionAssignmentResponse(BaseSchema):
     status: bool = True
     message: str
     updated_roles: List[str] = Field(default_factory=list)
+
+
+class ReviewChangeRequestPayload(BaseSchema):
+    """Request payload for reviewing (approving or rejecting) an RBAC change request."""
+    review_notes: Optional[str] = Field(None, max_length=255, description="Optional reviewer notes")
+
+
+class RBACChangeRequestResponse(BaseSchema):
+    """Response schema representing an RBAC dual-authorization change request."""
+    id: UUID
+    request_type: str
+    target_user_id: Optional[UUID] = None
+    target_role_id: Optional[UUID] = None
+    requested_payload: str
+    status: str
+    reason: str
+    requested_by_id: UUID
+    reviewed_by_id: Optional[UUID] = None
+    review_notes: Optional[str] = None
+    reviewed_at: Optional[datetime] = None
+    created_at: datetime

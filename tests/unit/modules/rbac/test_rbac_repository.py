@@ -24,7 +24,11 @@ async def test_get_user_roles_and_permissions_filters_obsolete_enums():
         ("OBSOLETE:MODULE:ACTION",),
     ]
 
-    mock_db.execute = AsyncMock(side_effect=[role_exec_mock, perm_exec_mock])
+    # Mock direct user permission query result
+    direct_exec_mock = MagicMock()
+    direct_exec_mock.fetchall.return_value = []
+
+    mock_db.execute = AsyncMock(side_effect=[role_exec_mock, perm_exec_mock, direct_exec_mock])
 
     repo = RBACRepository(db=mock_db)
     result = await repo.get_user_roles_and_permissions(user_id)

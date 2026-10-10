@@ -1,4 +1,5 @@
 from enum import Enum
+from typing import Sequence
 
 # Developer defined roles, module, resources, and actions
 # Production system permissions or attributes are defined by a dedicated endpoints
@@ -12,6 +13,31 @@ class RoleName(str, Enum):
     ADMIN = "ADMIN"
     STAFF_USER = "STAFF_USER"
     PUBLIC_USER = "PUBLIC_USER"
+
+
+ROLE_RANKS: dict[RoleName, int] = {
+    RoleName.SUPER_ADMIN: 100,
+    RoleName.ADMIN: 50,
+    RoleName.STAFF_USER: 10,
+    RoleName.PUBLIC_USER: 0,
+}
+
+
+def get_role_rank(role_name: str | RoleName) -> int:
+    """Returns numeric authority rank of a role."""
+    if isinstance(role_name, str):
+        try:
+            role_name = RoleName(role_name)
+        except ValueError:
+            return -1
+    return ROLE_RANKS.get(role_name, -1)
+
+
+def get_user_highest_rank(roles: Sequence[str | RoleName]) -> int:
+    """Returns highest numeric rank among a set of assigned roles."""
+    if not roles:
+        return -1
+    return max((get_role_rank(r) for r in roles), default=-1)
 
 
 ROLE_DESCRIPTIONS: dict[RoleName, str] = {
@@ -52,6 +78,8 @@ class ResourceName(str, Enum):
     SESSION = "SESSION"
     USER_ROLE = "USER_ROLE"
     ROLE_PERMISSION = "ROLE_PERMISSION"
+    DIRECT_PERMISSION = "DIRECT_PERMISSION"
+    CHANGE_REQUEST = "CHANGE_REQUEST"
 
 
 # Detailed descriptions for client UI and administrative metadata
@@ -63,6 +91,8 @@ RESOURCE_DESCRIPTIONS: dict[ResourceName, str] = {
     ResourceName.SESSION: "Active login sessions, terminals, and forced logouts.",
     ResourceName.USER_ROLE: "Assignment mapping connecting users to specific security roles.",
     ResourceName.ROLE_PERMISSION: "Assignment mapping granting specific permissions to security roles.",
+    ResourceName.DIRECT_PERMISSION: "Direct custom user permission grants and explicit denials outside role defaults.",
+    ResourceName.CHANGE_REQUEST: "Dual-authorization RBAC change requests requiring multi-tier hierarchical approval.",
 }
 
 
@@ -132,6 +162,11 @@ class SystemPermission(str, Enum):
     RBAC_ROLE_READ = f"{ModuleName.RBAC.value}:{ResourceName.ROLE.value}:{ActionName.READ.value}"
     RBAC_ROLE_ASSIGN = f"{ModuleName.RBAC.value}:{ResourceName.USER_ROLE.value}:{ActionName.ASSIGN.value}"
     RBAC_PERMISSION_ASSIGN = f"{ModuleName.RBAC.value}:{ResourceName.ROLE_PERMISSION.value}:{ActionName.ASSIGN.value}"
+    RBAC_DIRECT_PERMISSION_ASSIGN = f"{ModuleName.RBAC.value}:{ResourceName.DIRECT_PERMISSION.value}:{ActionName.ASSIGN.value}"
+    RBAC_DIRECT_PERMISSION_REVOKE = f"{ModuleName.RBAC.value}:{ResourceName.DIRECT_PERMISSION.value}:{ActionName.REVOKE.value}"
+    RBAC_CHANGE_REQUEST_READ = f"{ModuleName.RBAC.value}:{ResourceName.CHANGE_REQUEST.value}:{ActionName.READ.value}"
+    RBAC_CHANGE_REQUEST_APPROVE = f"{ModuleName.RBAC.value}:{ResourceName.CHANGE_REQUEST.value}:{ActionName.ACCEPT.value}"
+    RBAC_CHANGE_REQUEST_REJECT = f"{ModuleName.RBAC.value}:{ResourceName.CHANGE_REQUEST.value}:{ActionName.REJECT.value}"
 
     # Profile Module
     PROFILE_USER_READ = f"{ModuleName.PROFILE.value}:{ResourceName.USER.value}:{ActionName.READ.value}"
@@ -156,6 +191,9 @@ ROLE_DEFAULT_PERMISSIONS: dict[RoleName, set[SystemPermission]] = {
         SystemPermission.RBAC_ROLE_READ,
         SystemPermission.RBAC_ROLE_ASSIGN,
         SystemPermission.RBAC_PERMISSION_ASSIGN,
+        SystemPermission.RBAC_DIRECT_PERMISSION_ASSIGN,
+        SystemPermission.RBAC_DIRECT_PERMISSION_REVOKE,
+        SystemPermission.RBAC_CHANGE_REQUEST_READ,
         SystemPermission.PROFILE_USER_READ,
         SystemPermission.PROFILE_USER_UPDATE,
         SystemPermission.SESSION_SESSION_READ,

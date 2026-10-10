@@ -6,7 +6,15 @@ from db.db_session import get_async_db
 from exceptions.app_exception import InternalServerException
 from fastapi import Depends
 from loguru import logger
-from modules.authentication.auth_model import Permission, Role, RolePermission, UserRole
+from modules.authentication.auth_model import (
+    Permission,
+    RBACChangeRequest,
+    RBACChangeRequestStatus,
+    Role,
+    RolePermission,
+    UserPermission,
+    UserRole,
+)
 from shares.enums import (
     ACTION_DESCRIPTIONS,
     ROLE_DEFAULT_PERMISSIONS,
@@ -15,7 +23,7 @@ from shares.enums import (
     RoleName,
     SystemPermission,
 )
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -34,43 +42,56 @@ class RBACRepository(BaseRepository[Role]):
         self, user_id: UUID
     ) -> Dict[str, any]:
         """
-        Fetches all assigned role names and permission codes for a given user UUID.
+        Fetches all assigned role names, direct user grants, direct user revocations,
+        and resolved effective permission codes for a given user UUID.
         
-        Flow:
-        1. Fetch role names from auth.user_roles joined with auth.roles.
-        2. Fetch permission codes from auth.user_roles -> auth.role_permissions -> auth.permissions.
-        3. Returns structured dict: {"user_id": str(user_id), "roles": [...], "permissions": [...]}
+        Effective Formula:
+        Effective = (RolePermissions UNION DirectGrants) MINUS DirectRevocations
         """
         try:
-            # Fetch assigned role names
+            valid_role_names = {r.value for r in RoleName}
+            valid_perm_codes = {p.value for p in SystemPermission}
+
+            # 1. Fetch assigned role names
             role_stmt = (
                 select(Role.name)
                 .join(UserRole, UserRole.role_id == Role.id)
                 .where(UserRole.user_id == user_id)
             )
             role_res = await self.db.execute(role_stmt)
+            roles: List[str] = [r[0] for r in role_res.fetchall() if r[0] in valid_role_names]
 
-            # Fetch assigned permission codes
-            perm_stmt = (
+            # 2. Fetch role-granted permission codes
+            role_perm_stmt = (
                 select(Permission.code)
                 .join(RolePermission, RolePermission.permission_id == Permission.id)
                 .join(UserRole, UserRole.role_id == RolePermission.role_id)
                 .where(UserRole.user_id == user_id)
             )
-            perm_res = await self.db.execute(perm_stmt)
+            role_perm_res = await self.db.execute(role_perm_stmt)
+            role_perms = set(p[0] for p in role_perm_res.fetchall() if p[0] in valid_perm_codes)
 
-            valid_role_names = {r.value for r in RoleName}
-            valid_perm_codes = {p.value for p in SystemPermission}
+            # 3. Fetch direct user grants and explicit denials
+            direct_stmt = (
+                select(Permission.code, UserPermission.is_granted)
+                .join(UserPermission, UserPermission.permission_id == Permission.id)
+                .where(UserPermission.user_id == user_id)
+            )
+            direct_res = await self.db.execute(direct_stmt)
+            direct_rows = direct_res.fetchall()
 
-            # Filter against active enums in enums.py (source of truth)
-            roles: List[str] = [r[0] for r in role_res.fetchall() if r[0] in valid_role_names]
-            permissions: List[str] = list(set([p[0] for p in perm_res.fetchall() if p[0] in valid_perm_codes]))
+            direct_grants = [r[0] for r in direct_rows if r[1] is True and r[0] in valid_perm_codes]
+            direct_revocations = [r[0] for r in direct_rows if r[1] is False and r[0] in valid_perm_codes]
 
+            # 4. Resolve Effective Permissions
+            effective_perms = (role_perms | set(direct_grants)) - set(direct_revocations)
 
             return {
                 "user_id": str(user_id),
                 "roles": roles,
-                "permissions": permissions
+                "direct_grants": direct_grants,
+                "direct_revocations": direct_revocations,
+                "permissions": sorted(list(effective_perms)),
             }
         except Exception as e:
             logger.error(f"Failed to query roles and permissions for user {user_id}: {e}")
@@ -78,6 +99,120 @@ class RBACRepository(BaseRepository[Role]):
                 message="Error querying user roles and permissions.",
                 error_code="USER_ROLE_PERMISSION_FAILED"
             )
+
+
+    async def count_active_super_admins(self) -> int:
+        """Counts active users holding SUPER_ADMIN role."""
+        stmt = (
+            select(func.count(UserRole.user_id))
+            .join(Role, Role.id == UserRole.role_id)
+            .where(Role.name == RoleName.SUPER_ADMIN.value)
+        )
+        res = await self.db.execute(stmt)
+        return res.scalar_one() or 0
+
+
+    async def assign_user_direct_permissions(
+        self,
+        user_id: UUID,
+        permission_ids: List[UUID],
+        is_granted: bool,
+        assigned_by_id: Optional[UUID],
+        reason: str,
+    ) -> None:
+        """Assigns direct custom permission grants or explicit denials to a user."""
+        try:
+            del_stmt = delete(UserPermission).where(
+                UserPermission.user_id == user_id,
+                UserPermission.permission_id.in_(permission_ids),
+            )
+            await self.db.execute(del_stmt)
+
+            for p_id in permission_ids:
+                self.db.add(
+                    UserPermission(
+                        user_id=user_id,
+                        permission_id=p_id,
+                        is_granted=is_granted,
+                        assigned_by_id=assigned_by_id,
+                        reason=reason,
+                    )
+                )
+            await self.db.flush()
+        except Exception as e:
+            logger.error(f"Failed to assign direct user permissions for user {user_id}: {e}")
+            raise InternalServerException(
+                message="Failed to update user direct permissions.",
+                error_code="USER_PERMISSION_ASSIGNMENT_FAILED",
+            )
+
+
+    async def remove_user_direct_permissions(
+        self, user_id: UUID, permission_ids: List[UUID]
+    ) -> None:
+        """Removes direct permission overrides for a user."""
+        try:
+            del_stmt = delete(UserPermission).where(
+                UserPermission.user_id == user_id,
+                UserPermission.permission_id.in_(permission_ids),
+            )
+            await self.db.execute(del_stmt)
+            await self.db.flush()
+        except Exception as e:
+            logger.error(f"Failed to remove direct permissions for user {user_id}: {e}")
+            raise InternalServerException(
+                message="Failed to remove user direct permissions.",
+                error_code="USER_PERMISSION_REMOVAL_FAILED",
+            )
+
+
+    async def create_change_request(
+        self,
+        request_type: str,
+        target_user_id: Optional[UUID],
+        target_role_id: Optional[UUID],
+        requested_payload: str,
+        reason: str,
+        requested_by_id: UUID,
+    ) -> RBACChangeRequest:
+        """Creates a pending dual-authorization change request."""
+        try:
+            req = RBACChangeRequest(
+                request_type=request_type,
+                target_user_id=target_user_id,
+                target_role_id=target_role_id,
+                requested_payload=requested_payload,
+                status=RBACChangeRequestStatus.PENDING,
+                reason=reason,
+                requested_by_id=requested_by_id,
+            )
+            self.db.add(req)
+            await self.db.flush()
+            return req
+        except Exception as e:
+            logger.error(f"Failed to create RBAC change request: {e}")
+            raise InternalServerException(
+                message="Failed to create RBAC change request.",
+                error_code="CHANGE_REQUEST_CREATE_FAILED",
+            )
+
+
+    async def get_change_request_by_id(self, request_id: UUID) -> Optional[RBACChangeRequest]:
+        """Fetch change request by UUID."""
+        stmt = select(RBACChangeRequest).where(RBACChangeRequest.id == request_id)
+        res = await self.db.execute(stmt)
+        return res.scalar_one_or_none()
+
+
+    async def get_pending_change_requests(self) -> List[RBACChangeRequest]:
+        """Fetch all change requests with PENDING status."""
+        stmt = (
+            select(RBACChangeRequest)
+            .where(RBACChangeRequest.status == RBACChangeRequestStatus.PENDING)
+            .order_by(RBACChangeRequest.created_at.asc())
+        )
+        res = await self.db.execute(stmt)
+        return list(res.scalars().all())
 
 
     async def get_all_roles(self) -> List[Role]:

@@ -1,14 +1,20 @@
+from typing import List
 from uuid import UUID
 
 from dependencies.rbac_guard import require_role
 from fastapi import APIRouter, Depends, status
 from modules.rbac.rbac_schema import (
     AssignRolePermissionsPayload,
+    AssignUserDirectPermissionsPayload,
     AssignUserRolesPayload,
     BatchRolePermissionAssignmentPayload,
     BatchRolePermissionAssignmentResponse,
+    RBACChangeRequestResponse,
     RBACConfigResponse,
+    RemoveUserDirectPermissionsPayload,
+    ReviewChangeRequestPayload,
     RolePermissionAssignmentResponse,
+    UserDirectPermissionsResponse,
     UserRBACSummaryResponse,
     UserRoleAssignmentResponse,
 )
@@ -16,6 +22,26 @@ from modules.rbac.rbac_service import RBACService
 from shares.enums import RoleName
 
 router = APIRouter(prefix="/api/private/admin/rbac", tags=["RBAC Administration"])
+
+
+@router.get(
+    "/test-guarded-access",
+    summary="Probe endpoint guarded by ADMIN/SUPER_ADMIN for immediate revocation testing.",
+    status_code=status.HTTP_200_OK,
+)
+async def test_guarded_access(
+    caller_id: UUID = Depends(require_role(RoleName.SUPER_ADMIN, RoleName.ADMIN)),
+) -> dict:
+    """
+    Immediate Revocation Challenge Probe (BIR CAS Annex B Item 11.h):
+    Returns 200 OK if caller has active administrative privileges.
+    Returns 403 Forbidden immediately upon demotion or cache invalidation.
+    """
+    return {
+        "status": True,
+        "message": "Access granted: Caller possesses required administrative privileges.",
+        "user_id": str(caller_id),
+    }
 
 
 @router.get(
@@ -38,7 +64,7 @@ async def get_rbac_configuration(
 
 @router.get(
     "/users/{user_id}",
-    summary="Retrieve user's assigned roles and resolved effective permissions.",
+    summary="Retrieve user's assigned roles, direct overrides, and resolved permissions.",
     status_code=status.HTTP_200_OK,
     response_model=UserRBACSummaryResponse,
     dependencies=[Depends(require_role(RoleName.SUPER_ADMIN, RoleName.ADMIN))],
@@ -47,7 +73,7 @@ async def get_user_rbac_summary(
     user_id: UUID,
     service: RBACService = Depends(),
 ) -> UserRBACSummaryResponse:
-    """Retrieve user identity details, assigned roles, and resolved permissions."""
+    """Retrieve user identity details, assigned roles, direct overrides, and effective permissions."""
     return await service.get_user_rbac_summary(user_id=user_id)
 
 
@@ -56,15 +82,68 @@ async def get_user_rbac_summary(
     summary="Assign / update roles for a specific user and invalidate permission cache.",
     status_code=status.HTTP_200_OK,
     response_model=UserRoleAssignmentResponse,
-    dependencies=[Depends(require_role(RoleName.SUPER_ADMIN, RoleName.ADMIN))],
 )
 async def assign_user_roles(
     user_id: UUID,
     payload: AssignUserRolesPayload,
+    operator_id: UUID = Depends(require_role(RoleName.SUPER_ADMIN, RoleName.ADMIN)),
     service: RBACService = Depends(),
 ) -> UserRoleAssignmentResponse:
-    """Replaces user's assigned roles (accepts role names or UUIDs) and immediately flushes cache."""
-    return await service.assign_roles_to_user(user_id=user_id, role_identifiers=payload.roles)
+    """
+    Replaces user's assigned roles with strict governance refusals:
+    - Rejects self-mutation
+    - Rejects assignment at/above operator rank
+    - Rejects demotion of the last active Super Admin
+    - Non-super-admin privilege elevations queue for dual-authorization approval
+    - Immediately invalidates Redis cache and terminates sessions on demotion
+    """
+    return await service.assign_roles_to_user(
+        operator_id=operator_id,
+        user_id=user_id,
+        role_identifiers=payload.roles,
+        reason=payload.reason,
+    )
+
+
+@router.post(
+    "/users/{user_id}/permissions",
+    summary="Grant or explicitly deny custom direct permissions for a user.",
+    status_code=status.HTTP_200_OK,
+    response_model=UserDirectPermissionsResponse,
+)
+async def assign_user_direct_permissions(
+    user_id: UUID,
+    payload: AssignUserDirectPermissionsPayload,
+    operator_id: UUID = Depends(require_role(RoleName.SUPER_ADMIN, RoleName.ADMIN)),
+    service: RBACService = Depends(),
+) -> UserDirectPermissionsResponse:
+    """Grants or denies direct custom permissions, enforcing grant ceiling and rank boundaries."""
+    return await service.assign_direct_permissions_to_user(
+        operator_id=operator_id,
+        user_id=user_id,
+        payload=payload,
+    )
+
+
+@router.delete(
+    "/users/{user_id}/permissions",
+    summary="Remove direct permission overrides from a user.",
+    status_code=status.HTTP_200_OK,
+    response_model=UserDirectPermissionsResponse,
+)
+async def remove_user_direct_permissions(
+    user_id: UUID,
+    payload: RemoveUserDirectPermissionsPayload,
+    operator_id: UUID = Depends(require_role(RoleName.SUPER_ADMIN, RoleName.ADMIN)),
+    service: RBACService = Depends(),
+) -> UserDirectPermissionsResponse:
+    """Removes direct permission overrides for a user and invalidates cache."""
+    return await service.remove_direct_permissions_from_user(
+        operator_id=operator_id,
+        user_id=user_id,
+        permissions=payload.permissions,
+        reason=payload.reason,
+    )
 
 
 @router.put(
@@ -72,16 +151,25 @@ async def assign_user_roles(
     summary="Assign / update permissions for a role and invalidate affected user caches.",
     status_code=status.HTTP_200_OK,
     response_model=RolePermissionAssignmentResponse,
-    dependencies=[Depends(require_role(RoleName.SUPER_ADMIN, RoleName.ADMIN))],
 )
 async def assign_role_permissions(
     role_identifier: str,
     payload: AssignRolePermissionsPayload,
+    operator_id: UUID = Depends(require_role(RoleName.SUPER_ADMIN, RoleName.ADMIN)),
     service: RBACService = Depends(),
 ) -> RolePermissionAssignmentResponse:
-    """Replaces permissions for a role (by role name or UUID) and invalidates Redis cache."""
+    """
+    Replaces permissions for a role:
+    - Super Admin permissions are immutable
+    - Operator cannot edit role with rank >= own rank
+    - Operator cannot grant permissions they do not hold
+    - Post-commit cache invalidation for all affected users
+    """
     return await service.assign_permissions_to_role(
-        role_identifier=role_identifier, permission_identifiers=payload.permissions
+        operator_id=operator_id,
+        role_identifier=role_identifier,
+        permission_identifiers=payload.permissions,
+        reason=payload.reason,
     )
 
 
@@ -90,14 +178,17 @@ async def assign_role_permissions(
     summary="Batch update permissions across multiple roles in a single operation.",
     status_code=status.HTTP_200_OK,
     response_model=BatchRolePermissionAssignmentResponse,
-    dependencies=[Depends(require_role(RoleName.SUPER_ADMIN, RoleName.ADMIN))],
 )
 async def batch_assign_role_permissions(
     payload: BatchRolePermissionAssignmentPayload,
+    operator_id: UUID = Depends(require_role(RoleName.SUPER_ADMIN, RoleName.ADMIN)),
     service: RBACService = Depends(),
 ) -> BatchRolePermissionAssignmentResponse:
-    """Atomically updates permissions for multiple roles and flushes affected user caches."""
-    return await service.batch_assign_role_permissions(payload=payload)
+    """Atomically updates permissions for multiple roles with governance refusal validation."""
+    return await service.batch_assign_role_permissions(
+        operator_id=operator_id,
+        payload=payload,
+    )
 
 
 @router.post(
@@ -105,11 +196,75 @@ async def batch_assign_role_permissions(
     summary="Reset a role's permissions back to its code-defined default preset.",
     status_code=status.HTTP_200_OK,
     response_model=RolePermissionAssignmentResponse,
-    dependencies=[Depends(require_role(RoleName.SUPER_ADMIN, RoleName.ADMIN))],
 )
 async def reset_role_to_defaults(
     role_identifier: str,
+    operator_id: UUID = Depends(require_role(RoleName.SUPER_ADMIN, RoleName.ADMIN)),
     service: RBACService = Depends(),
 ) -> RolePermissionAssignmentResponse:
     """Reverts a system role's permissions to its default preset defined in enums.py."""
-    return await service.reset_role_to_defaults(role_identifier=role_identifier)
+    return await service.reset_role_to_defaults(
+        operator_id=operator_id,
+        role_identifier=role_identifier,
+    )
+
+
+@router.get(
+    "/requests",
+    summary="List pending dual-control change requests awaiting hierarchical review.",
+    status_code=status.HTTP_200_OK,
+    response_model=List[RBACChangeRequestResponse],
+)
+async def list_pending_change_requests(
+    operator_id: UUID = Depends(require_role(RoleName.SUPER_ADMIN, RoleName.ADMIN)),
+    service: RBACService = Depends(),
+) -> List[RBACChangeRequestResponse]:
+    """Lists pending privilege escalation requests."""
+    return await service.list_pending_change_requests(operator_id=operator_id)
+
+
+@router.post(
+    "/requests/{request_id}/approve",
+    summary="Approve an RBAC change request under hierarchical authority.",
+    status_code=status.HTTP_200_OK,
+    response_model=RBACChangeRequestResponse,
+)
+async def approve_change_request(
+    request_id: UUID,
+    payload: ReviewChangeRequestPayload,
+    operator_id: UUID = Depends(require_role(RoleName.SUPER_ADMIN, RoleName.ADMIN)),
+    service: RBACService = Depends(),
+) -> RBACChangeRequestResponse:
+    """
+    Approves change request:
+    - Enforces dual control (requester cannot self-approve)
+    - Reviewer rank must strictly exceed requester rank
+    - Applies changes and flushes target user cache
+    """
+    return await service.review_change_request(
+        operator_id=operator_id,
+        request_id=request_id,
+        payload=payload,
+        is_approved=True,
+    )
+
+
+@router.post(
+    "/requests/{request_id}/reject",
+    summary="Reject an RBAC change request.",
+    status_code=status.HTTP_200_OK,
+    response_model=RBACChangeRequestResponse,
+)
+async def reject_change_request(
+    request_id: UUID,
+    payload: ReviewChangeRequestPayload,
+    operator_id: UUID = Depends(require_role(RoleName.SUPER_ADMIN, RoleName.ADMIN)),
+    service: RBACService = Depends(),
+) -> RBACChangeRequestResponse:
+    """Rejects change request with review notes."""
+    return await service.review_change_request(
+        operator_id=operator_id,
+        request_id=request_id,
+        payload=payload,
+        is_approved=False,
+    )
