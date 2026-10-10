@@ -1,0 +1,98 @@
+# ==============================================================================
+# RBAC ROLE & PERMISSION USER ASSIGNMENT (BIR CAS ANNEX B ITEM 11.A & 214)
+# ==============================================================================
+
+###
+# 1. Get Unified RBAC Configuration (Admin/Super Admin)
+# Returns complete hierarchy (Module -> Resource -> Action) and active database roles with permissions.
+# Guarded by require_role(SUPER_ADMIN, ADMIN).
+# @name getRBACConfiguration
+GET {{host}}/api/private/admin/rbac
+Content-Type: application/json
+X-Header: {{secret_header_value}}
+
+
+###
+# 2. Get User RBAC Summary & Effective Permissions
+# Retrieves user's assigned roles and resolved effective permissions (Redis / DB).
+# Guarded by require_role(SUPER_ADMIN, ADMIN).
+# Replace :user_id with the target user's UUID
+# @name getUserRBACSummary
+GET {{host}}/api/private/admin/rbac/users/01a11fcc-e2eb-7174-9534-2fae492eb2b1
+Content-Type: application/json
+X-Header: {{secret_header_value}}
+
+
+###
+# 3. Assign / Update Roles for a Specific User
+# Replaces user's roles (accepts role names or UUIDs) and flushes Redis cache (user_permission:{user_id}).
+# Guarded by require_role(SUPER_ADMIN, ADMIN).
+# Replace :user_id with the target user's UUID
+# @name assignUserRoles
+PUT {{host}}/api/private/admin/rbac/users/01a11fcc-e2eb-7174-9534-2fae492eb2b1/roles
+Content-Type: application/json
+X-Header: {{secret_header_value}}
+
+{
+    "roles": [
+        "ADMIN",
+        "STAFF_USER"
+    ]
+}
+
+
+###
+# 4. Assign / Update Permissions for a Specific Role
+# Replaces permissions for a role (by role name or UUID) and invalidates Redis cache for all affected users.
+# Guarded by require_role(SUPER_ADMIN, ADMIN).
+# @name assignRolePermissions
+PUT {{host}}/api/private/admin/rbac/roles/STAFF_USER/permissions
+Content-Type: application/json
+X-Header: {{secret_header_value}}
+
+{
+    "permissions": [
+        "PROFILE:USER:READ",
+        "PROFILE:USER:UPDATE"
+    ]
+}
+
+
+###
+# 5. Batch Update Permissions Across Multiple Roles
+# Atomically updates permissions across multiple roles in a single operation.
+# Guarded by require_role(SUPER_ADMIN, ADMIN).
+# @name batchAssignRolePermissions
+POST {{host}}/api/private/admin/rbac/roles/batch-assign-permissions
+Content-Type: application/json
+X-Header: {{secret_header_value}}
+
+{
+    "assignments": [
+        {
+            "role": "STAFF_USER",
+            "permissions": [
+                "PROFILE:USER:READ",
+                "PROFILE:USER:UPDATE"
+            ]
+        },
+        {
+            "role": "ADMIN",
+            "permissions": [
+                "AUTHENTICATION:USER:READ",
+                "AUTHENTICATION:REGISTRATION:ACCEPT",
+                "AUTHENTICATION:REGISTRATION:REJECT"
+            ]
+        }
+    ]
+}
+
+
+###
+# 6. Reset Role Permissions to Code-Defined Defaults
+# Reverts a system role back to its exact ROLE_DEFAULT_PERMISSIONS preset in enums.py.
+# Guarded by require_role(SUPER_ADMIN, ADMIN).
+# @name resetRoleToDefaults
+POST {{host}}/api/private/admin/rbac/roles/STAFF_USER/reset-defaults
+Content-Type: application/json
+X-Header: {{secret_header_value}}
