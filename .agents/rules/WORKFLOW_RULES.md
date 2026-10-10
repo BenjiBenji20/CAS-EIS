@@ -18,6 +18,8 @@ trigger: always_on
 **Files:**
 - **`AGENTS.md`**: Root entrypoint and navigation index for AI agents. Use it to jump straight to the prompts a problem needs, so you don't re-read unnecessary ones and waste tokens.
 - **`.agents/`**: Complete prompt collection. Read it all once on a fresh start, then selectively afterward.
+- **`docs/api/**: Rest CLient API testing and documentation.
+- **`docs/docs/**: Detailed system documentation.
 
 ### 2. STRICT READ-ONLY GIT POLICY
 - **Permitted Git Commands:** Only non-mutating inspection commands are allowed (`git status`, `git log`, `git diff`, `git branch --list`).
