@@ -8,7 +8,6 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
-    Sequence,
     String,
     text,
 )
@@ -189,9 +188,6 @@ class RBACChangeRequest(Base, TimestampMixin):
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-user_code_seq = Sequence("user_code_seq", schema="auth", metadata=Base.metadata)
-
-
 class User(Base, TimestampMixin):
     """Core identity and authentication record."""
 
@@ -201,7 +197,6 @@ class User(Base, TimestampMixin):
     id: Mapped[uuid_pk]
     user_code: Mapped[str] = mapped_column(
         String(20),
-        user_code_seq,
         unique=True,
         index=True,
         nullable=False,
