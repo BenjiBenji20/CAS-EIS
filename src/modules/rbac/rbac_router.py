@@ -1,8 +1,8 @@
-from typing import List
+from typing import List, Optional
 from uuid import UUID
 
 from dependencies.rbac_guard import require_role
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from modules.rbac.rbac_schema import (
     AssignRolePermissionsPayload,
     AssignUserDirectPermissionsPayload,
@@ -15,6 +15,7 @@ from modules.rbac.rbac_schema import (
     ReviewChangeRequestPayload,
     RolePermissionAssignmentResponse,
     UserDirectPermissionsResponse,
+    UserRBACListItemResponse,
     UserRBACSummaryResponse,
     UserRoleAssignmentResponse,
 )
@@ -60,6 +61,27 @@ async def get_rbac_configuration(
     - All active database roles and their assigned permission codes.
     """
     return await service.get_rbac_configuration()
+
+
+@router.get(
+    "/users-role-perms",
+    summary="List all users and their assigned roles and permissions (Admin only).",
+    status_code=status.HTTP_200_OK,
+    response_model=List[UserRBACListItemResponse],
+    dependencies=[Depends(require_role(RoleName.SUPER_ADMIN, RoleName.ADMIN))],
+)
+async def list_all_users_rbac_summary(
+    role: Optional[str] = Query(None, description="Filter by role name or UUID"),
+    search: Optional[str] = Query(None, description="Search by username, user code, or email"),
+    status: Optional[str] = Query(None, description="Filter by account status (e.g. ACTIVE, PENDING)"),
+    service: RBACService = Depends(),
+) -> List[UserRBACListItemResponse]:
+    """Retrieve enterprise-wide list of users with assigned roles, direct overrides, and effective permissions."""
+    return await service.list_all_users_rbac_summary(
+        role=role,
+        search=search,
+        status_filter=status,
+    )
 
 
 @router.get(

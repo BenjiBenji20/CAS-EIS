@@ -8,7 +8,7 @@ from exceptions.app_exception import (
     ForbiddenException,
     NotFoundException,
 )
-from modules.authentication.auth_model import Permission, RBACChangeRequestStatus, Role, User
+from modules.authentication.auth_model import Permission, RBACChangeRequestStatus, Role, User, UserPermission
 from modules.rbac.rbac_schema import (
     AssignUserDirectPermissionsPayload,
     BatchRolePermissionAssignmentPayload,
@@ -310,3 +310,65 @@ async def test_assign_direct_permissions_grant_ceiling(rbac_service, mock_auth_r
             payload=payload,
         )
     assert exc_info.value.error_code == "GRANT_CEILING_EXCEEDED"
+
+
+@pytest.mark.asyncio
+async def test_list_all_users_rbac_summary_with_ids(rbac_service, mock_rbac_repo):
+    """Test retrieving enterprise user list with role and permission UUIDs and effective resolution."""
+    user_id = uuid.uuid4()
+    role_id = uuid.uuid4()
+    perm_read_id = uuid.uuid4()
+    perm_reject_id = uuid.uuid4()
+
+    mock_perm_read = MagicMock(spec=Permission)
+    mock_perm_read.id = perm_read_id
+    mock_perm_read.code = SystemPermission.AUTHENTICATION_USER_READ.value
+
+    mock_role = MagicMock(spec=Role)
+    mock_role.id = role_id
+    mock_role.name = "ADMIN"
+    mock_role.permissions = [mock_perm_read]
+
+    mock_perm_revoke = MagicMock(spec=Permission)
+    mock_perm_revoke.id = perm_reject_id
+    mock_perm_revoke.code = SystemPermission.SESSION_SESSION_REVOKE.value
+
+    mock_direct_up = MagicMock(spec=UserPermission)
+    mock_direct_up.permission = mock_perm_revoke
+    mock_direct_up.is_granted = True
+
+    mock_user = MagicMock(spec=User)
+    mock_user.id = user_id
+    mock_user.user_code = "USR-00007"
+    mock_user.username = "user7"
+    mock_user.email = "user7@ussci.com"
+    mock_user.status = "ACTIVE"
+    mock_user.roles = [mock_role]
+    mock_user.direct_permissions = [mock_direct_up]
+
+    mock_rbac_repo.get_all_users_with_rbac_details = AsyncMock(return_value=[mock_user])
+
+    results = await rbac_service.list_all_users_rbac_summary(role="ADMIN")
+
+    assert len(results) == 1
+    u = results[0]
+    assert u.user_id == user_id
+    assert u.user_code == "USR-00007"
+    assert u.username == "user7"
+    assert u.highest_rank == 50
+    assert len(u.roles) == 1
+    assert u.roles[0].id == role_id
+    assert u.roles[0].name == "ADMIN"
+    assert u.roles[0].rank == 50
+
+    # Direct grants check
+    assert len(u.direct_grants) == 1
+    assert u.direct_grants[0].id == perm_reject_id
+    assert u.direct_grants[0].code == "SESSION:SESSION:REVOKE"
+
+    # Effective permissions check (includes both role perm and direct grant with their IDs)
+    effective_codes = [p.code for p in u.permissions]
+    assert "AUTHENTICATION:USER:READ" in effective_codes
+    assert "SESSION:SESSION:REVOKE" in effective_codes
+    read_item = next(p for p in u.permissions if p.code == "AUTHENTICATION:USER:READ")
+    assert read_item.id == perm_read_id

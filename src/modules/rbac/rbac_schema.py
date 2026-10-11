@@ -65,6 +65,33 @@ class UserRBACSummaryResponse(BaseSchema):
     permissions: List[str] = Field(default_factory=list, description="Effective permission set")
 
 
+class RoleSimpleSchema(BaseSchema):
+    """Simplified role representation with ID, name, and rank."""
+    id: UUID
+    name: str
+    rank: int = Field(0, description="Hierarchical numeric rank")
+
+
+class PermissionSimpleSchema(BaseSchema):
+    """Simplified permission representation with ID and canonical code."""
+    id: UUID
+    code: str
+
+
+class UserRBACListItemResponse(BaseSchema):
+    """Enriched user summary with role and permission UUIDs for enterprise list views."""
+    user_id: UUID
+    user_code: Optional[str] = None
+    username: str
+    email: str
+    status: str
+    highest_rank: int = Field(0, description="Highest numeric rank among assigned roles")
+    roles: List[RoleSimpleSchema] = Field(default_factory=list)
+    direct_grants: List[PermissionSimpleSchema] = Field(default_factory=list)
+    direct_revocations: List[PermissionSimpleSchema] = Field(default_factory=list)
+    permissions: List[PermissionSimpleSchema] = Field(default_factory=list)
+
+
 class AssignUserRolesPayload(BaseSchema):
     """Request payload for assigning roles to a user (accepts role names or UUIDs)."""
     roles: List[str] = Field(

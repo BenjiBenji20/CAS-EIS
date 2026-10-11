@@ -21,13 +21,16 @@ from modules.rbac.rbac_schema import (
     BatchRolePermissionAssignmentPayload,
     BatchRolePermissionAssignmentResponse,
     ModuleSchema,
+    PermissionSimpleSchema,
     RBACChangeRequestResponse,
     RBACConfigResponse,
     ReviewChangeRequestPayload,
     RoleOverviewSchema,
     RolePermissionAssignmentResponse,
+    RoleSimpleSchema,
     UserDirectPermissionsResponse,
     UserPermissionsCachePayload,
+    UserRBACListItemResponse,
     UserRBACSummaryResponse,
     UserRoleAssignmentResponse,
 )
@@ -147,6 +150,78 @@ class RBACService:
             direct_revocations=db_payload.get("direct_revocations", []),
             permissions=db_payload.get("permissions", []),
         )
+
+    async def list_all_users_rbac_summary(
+        self,
+        role: Optional[str] = None,
+        search: Optional[str] = None,
+        status_filter: Optional[str] = None,
+    ) -> List[UserRBACListItemResponse]:
+        """
+        Retrieves enterprise-wide user list with assigned roles and effective permissions,
+        including database UUIDs for both roles and permissions.
+        Optimized with a single batched database query.
+        """
+        valid_role_names = {r.value for r in RoleName}
+        valid_perm_codes = {p.value for p in SystemPermission}
+
+        users = await self.rbac_repo.get_all_users_with_rbac_details(
+            role=role,
+            search=search,
+            status_filter=status_filter,
+        )
+
+        results: List[UserRBACListItemResponse] = []
+        for u in users:
+            active_roles = [r for r in u.roles if r.name in valid_role_names]
+            role_schemas = [
+                RoleSimpleSchema(
+                    id=r.id,
+                    name=r.name,
+                    rank=get_role_rank(r.name),
+                )
+                for r in active_roles
+            ]
+            highest_rank = get_user_highest_rank([r.name for r in active_roles])
+
+            effective_perms_map: dict[str, PermissionSimpleSchema] = {}
+            for r in active_roles:
+                for p in r.permissions:
+                    if p.code in valid_perm_codes:
+                        effective_perms_map[p.code] = PermissionSimpleSchema(id=p.id, code=p.code)
+
+            direct_grants: List[PermissionSimpleSchema] = []
+            direct_revocations: List[PermissionSimpleSchema] = []
+
+            for up in u.direct_permissions:
+                p = up.permission
+                if p and p.code in valid_perm_codes:
+                    schema_item = PermissionSimpleSchema(id=p.id, code=p.code)
+                    if up.is_granted:
+                        direct_grants.append(schema_item)
+                        effective_perms_map[p.code] = schema_item
+                    else:
+                        direct_revocations.append(schema_item)
+                        effective_perms_map.pop(p.code, None)
+
+            sorted_effective = sorted(effective_perms_map.values(), key=lambda p: p.code)
+
+            results.append(
+                UserRBACListItemResponse(
+                    user_id=u.id,
+                    user_code=u.user_code,
+                    username=u.username,
+                    email=u.email,
+                    status=str(u.status.value) if hasattr(u.status, "value") else str(u.status),
+                    highest_rank=highest_rank,
+                    roles=role_schemas,
+                    direct_grants=direct_grants,
+                    direct_revocations=direct_revocations,
+                    permissions=sorted_effective,
+                )
+            )
+
+        return results
 
     async def assign_roles_to_user(
         self,

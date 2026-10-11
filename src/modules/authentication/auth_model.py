@@ -140,6 +140,13 @@ class UserPermission(Base, TimestampMixin):
     )
     reason: Mapped[str] = mapped_column(String(255), nullable=False)
 
+    # Relationship to Permission model
+    permission: Mapped[Permission] = relationship(
+        "Permission",
+        foreign_keys=[permission_id],
+        lazy="selectin",
+    )
+
 
 class RBACChangeRequestStatus(str, PyEnum):
     """Status for dual-authorization RBAC change requests."""

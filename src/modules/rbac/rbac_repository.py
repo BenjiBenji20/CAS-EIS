@@ -12,8 +12,10 @@ from modules.authentication.auth_model import (
     RBACChangeRequestStatus,
     Role,
     RolePermission,
+    User,
     UserPermission,
     UserRole,
+    UserStatus,
 )
 from shares.enums import (
     ACTION_DESCRIPTIONS,
@@ -23,7 +25,7 @@ from shares.enums import (
     RoleName,
     SystemPermission,
 )
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import String, cast, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -213,6 +215,64 @@ class RBACRepository(BaseRepository[Role]):
         )
         res = await self.db.execute(stmt)
         return list(res.scalars().all())
+
+    async def get_all_users_with_rbac_details(
+        self,
+        role: Optional[str] = None,
+        search: Optional[str] = None,
+        status_filter: Optional[str] = None,
+    ) -> List[User]:
+        """
+        Fetches all users with eager-loaded roles, role permissions, and direct permissions
+        in a batched single-operation pipeline (N+1 safe).
+        """
+        try:
+            stmt = (
+                select(User)
+                .options(
+                    selectinload(User.roles).selectinload(Role.permissions),
+                    selectinload(User.direct_permissions).selectinload(UserPermission.permission),
+                )
+                .order_by(User.user_code.asc())
+            )
+
+            # Optional status filter
+            if status_filter:
+                clean_status = status_filter.strip().upper()
+                try:
+                    stmt = stmt.where(User.status == UserStatus(clean_status))
+                except ValueError:
+                    stmt = stmt.where(cast(User.status, String) == clean_status)
+
+            # Optional search filter (case-insensitive partial match on username, user_code, or email)
+            if search:
+                pattern = f"%{search.strip().lower()}%"
+                stmt = stmt.where(
+                    or_(
+                        func.lower(User.username).like(pattern),
+                        func.lower(User.user_code).like(pattern),
+                        func.lower(User.email).like(pattern),
+                    )
+                )
+
+            # Optional role filter (by role name or role UUID)
+            if role:
+                role_val = role.strip()
+                stmt = stmt.join(UserRole, UserRole.user_id == User.id).join(Role, Role.id == UserRole.role_id)
+                try:
+                    role_uuid = UUID(role_val)
+                    stmt = stmt.where(or_(Role.id == role_uuid, func.upper(Role.name) == role_val.upper()))
+                except ValueError:
+                    stmt = stmt.where(func.upper(Role.name) == role_val.upper())
+
+            res = await self.db.execute(stmt)
+            return list(res.scalars().unique().all())
+        except Exception as e:
+            logger.error(f"Failed to query all users with RBAC details: {e}")
+            raise InternalServerException(
+                message="Error querying enterprise user RBAC details.",
+                error_code="USER_RBAC_LIST_FAILED",
+            )
 
 
     async def get_all_roles(self) -> List[Role]:
