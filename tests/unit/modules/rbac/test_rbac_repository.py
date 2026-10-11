@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, MagicMock
 import uuid
 import pytest
 
-from modules.authentication.auth_model import Permission, Role
+from modules.rbac.rbac_model import Permission, Role
 from modules.rbac.rbac_repository import RBACRepository
 from shares.enums import RoleName, SystemPermission
 

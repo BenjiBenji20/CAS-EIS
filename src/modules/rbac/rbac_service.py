@@ -11,7 +11,7 @@ from exceptions.app_exception import (
     ForbiddenException,
     NotFoundException,
 )
-from modules.authentication.auth_model import RBACChangeRequest, RBACChangeRequestStatus
+from modules.rbac.rbac_model import RBACChangeRequest, RBACChangeRequestStatus
 from modules.authentication.auth_repository import AuthenticationRepository
 from modules.rbac.rbac_repository import RBACRepository
 from modules.rbac.rbac_schema import (

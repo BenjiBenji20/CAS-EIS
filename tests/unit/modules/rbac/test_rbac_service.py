@@ -8,7 +8,8 @@ from exceptions.app_exception import (
     ForbiddenException,
     NotFoundException,
 )
-from modules.authentication.auth_model import Permission, RBACChangeRequestStatus, Role, User, UserPermission
+from modules.authentication.auth_model import User
+from modules.rbac.rbac_model import Permission, RBACChangeRequestStatus, Role, UserPermission
 from modules.rbac.rbac_schema import (
     AssignUserDirectPermissionsPayload,
     BatchRolePermissionAssignmentPayload,

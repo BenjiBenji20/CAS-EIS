@@ -6,16 +6,15 @@ from db.db_session import get_async_db
 from exceptions.app_exception import InternalServerException
 from fastapi import Depends
 from loguru import logger
-from modules.authentication.auth_model import (
+from modules.authentication.auth_model import User, UserStatus
+from modules.rbac.rbac_model import (
     Permission,
     RBACChangeRequest,
     RBACChangeRequestStatus,
     Role,
     RolePermission,
-    User,
     UserPermission,
     UserRole,
-    UserStatus,
 )
 from shares.enums import (
     ACTION_DESCRIPTIONS,
